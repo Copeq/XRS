@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { HomeState, DroneRow } from "../composables/useLiveSocket";
 import { pageFetch } from "../composables/pageApi";
 
-// 与旧版一致：运行时同源加载站端自带 /assets/leaflet/leaflet.{js,css}
+// 运行时同源加载站端自带 /assets/leaflet/leaflet.{js,css}
 const LEAF_CSS = "/assets/leaflet/leaflet.css";
 const LEAF_JS = "/assets/leaflet/leaflet.js";
 
@@ -26,10 +26,18 @@ let zoneSig = "";
 const droneMarkers = new Map<string, any>();
 const prevPos = new Map<string, { lat: number; lon: number }>();
 let fittedOnce = false;
+
 let selectedSn = "";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let trackLayer: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let selAircraftLine: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let selPilotMark: any = null;
+let selLastPt: [number, number] | null = null;
+
 let riskHintEl: HTMLDivElement | null = null;
+let selectSeq = 0;
 
 const META = (): Record<string, unknown> => (props.state.meta ?? {}) as Record<string, unknown>;
 const DEFAULT_URL = "https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}";
@@ -228,51 +236,7 @@ function droneHeading(d: DroneRow, lat: number, lon: number): number {
   return 0;
 }
 
-async function fetchDroneTracks(sn: string) {
-  const d = (await pageFetch(
-    `/api/drones/get?sn=${encodeURIComponent(sn)}&include_tracks=1`,
-  )) as Record<string, unknown>;
-  const tracks = d.tracks && typeof d.tracks === "object" ? (d.tracks as Record<string, unknown>) : {};
-  const pick = (list: unknown) => {
-    const out: Array<[number, number]> = [];
-    if (!Array.isArray(list)) return out;
-    for (const raw of list) {
-      const p = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
-      if (!p) continue;
-      const lat = Number(p.lat ?? p.latitude);
-      const lon = Number(p.lon ?? p.lng ?? p.longitude);
-      if (Number.isFinite(lat) && Number.isFinite(lon) && lat !== 0 && lon !== 0) out.push([lat, lon]);
-    }
-    return out;
-  };
-  return {
-    item: d && typeof d.item === "object" ? (d.item as Record<string, unknown>) : {},
-    aircraft: pick(Array.isArray(tracks.aircraft) ? tracks.aircraft : Array.isArray(d.track) ? d.track : []),
-    operator: pick(Array.isArray(tracks.operator) ? tracks.operator : []),
-  };
-}
-
-function clearTrackLayer() {
-  if (trackLayer) {
-    map.removeLayer(trackLayer);
-    trackLayer = null;
-  }
-}
-
-let selectSeq = 0;
-
-function circle(pos: [number, number], color: string, tooltip?: string) {
-  const m = L.circleMarker(pos, {
-    radius: 6,
-    color,
-    weight: 2,
-    fillColor: color,
-    fillOpacity: 0.6,
-  });
-  if (tooltip) m.bindTooltip(tooltip, { sticky: true });
-  m.addTo(trackLayer);
-  return m;
-}
+/* ---------- 选中轨迹（实时续画） ---------- */
 
 function liveRow(sn: string) {
   return (props.state.drones ?? []).find((d) => String(d.sn ?? "") === sn);
@@ -297,54 +261,124 @@ function ensureTrackLayer() {
   return trackLayer;
 }
 
-// 同步立即绘制：基于实时行先显示无人机/飞手当前点，不等网络
-function drawLiveImmediately(sn: string): boolean {
-  const live = liveRow(sn);
-  const pts = livePoint(live);
-  if (!pts) return false;
+function samePt(a: [number, number] | null, b: [number, number] | null): boolean {
+  return !!a && !!b && a[0] === b[0] && a[1] === b[1];
+}
+
+function clearTrackLayer() {
+  if (trackLayer) {
+    map.removeLayer(trackLayer);
+    trackLayer = null;
+  }
+  selAircraftLine = null;
+  selPilotMark = null;
+  selLastPt = null;
+}
+
+function ensureAircraftLine() {
+  if (!selAircraftLine) {
+    selAircraftLine = L.polyline([], { color: "#2f81f7", weight: 3, opacity: 0.95 }).addTo(ensureTrackLayer());
+  }
+  return selAircraftLine;
+}
+
+function ensurePilotMark() {
+  if (!selPilotMark) {
+    selPilotMark = L.circleMarker([0, 0], {
+      radius: 7,
+      color: "#e67e22",
+      weight: 2,
+      fillColor: "#e67e22",
+      fillOpacity: 0.7,
+    })
+      .addTo(ensureTrackLayer())
+      .bindTooltip("飞手位置", { sticky: true });
+  }
+  return selPilotMark;
+}
+
+// 实时续画：每帧把新位置追加到已画轨迹，并移动飞手点
+function updateSelectedLive() {
+  if (!map || !selectedSn) return;
+  const live = liveRow(selectedSn);
+  const pt = livePoint(live);
+  if (!pt) return;
   ensureTrackLayer();
-  circle(pts, "#2f81f7", "无人机(实时)");
+  const line = ensureAircraftLine();
+  if (!samePt(selLastPt, pt)) {
+    if (selLastPt) {
+      line.addLatLng(pt);
+    } else {
+      line.setLatLngs([pt]);
+    }
+    selLastPt = pt;
+  }
   const pilot = livePilot(live);
   if (pilot) {
-    circle(pilot, "#e67e22", "飞手位置(实时)");
-  }
-  return true;
-}
-
-function drawDetailed(sn: string, aircraft: Array<[number, number]>, operator: Array<[number, number]>) {
-  clearTrackLayer();
-  ensureTrackLayer();
-  const style = (c: string) => ({ color: c, weight: 3, fillOpacity: 0 });
-  if (aircraft.length >= 2) {
-    L.polyline(aircraft, style("#2f81f7")).addTo(trackLayer);
-  } else if (aircraft.length === 1) {
-    circle(aircraft[0], "#2f81f7", "无人机");
-  }
-  if (operator.length) {
-    if (operator.length >= 2) L.polyline(operator, style("#e67e22")).addTo(trackLayer);
-    circle(operator[operator.length - 1], "#e67e22", "飞手位置");
-  }
-  if (!aircraft.length && !operator.length) {
-    drawLiveImmediately(sn);
+    ensurePilotMark().setLatLng(pilot);
   }
 }
 
-async function selectDrone(sn: string) {
+// 点击时同步立即显示当前点，再回填历史，之后由 updateSelectedLive 持续续画
+function selectDrone(sn: string) {
   if (!map) return;
   const seq = ++selectSeq;
   selectedSn = sn;
-  // 1) 同步先画实时点，立即有反馈
-  if (!drawLiveImmediately(sn)) clearTrackLayer();
-  // 2) 异步拉详情后替换为完整轨迹
-  try {
-    const { aircraft, operator } = await fetchDroneTracks(sn);
-    if (!map || seq !== selectSeq || selectedSn !== sn) return;
-    drawDetailed(sn, aircraft, operator);
-  } catch (_e) {
-    // 保留同步已画的实时点即可
-    if (!map || seq !== selectSeq || selectedSn !== sn) return;
+  clearTrackLayer();
+  ensureTrackLayer();
+  const live = liveRow(sn);
+  const pt = livePoint(live);
+  if (pt) {
+    ensureAircraftLine().setLatLngs([pt]);
+    selLastPt = pt;
   }
+  const pilot = livePilot(live);
+  if (pilot) {
+    ensurePilotMark().setLatLng(pilot);
+  }
+  void (async () => {
+    try {
+      const d = (await pageFetch(
+        `/api/drones/get?sn=${encodeURIComponent(sn)}&include_tracks=1`,
+      )) as Record<string, unknown>;
+      if (!map || seq !== selectSeq || selectedSn !== sn) return;
+      const tracks = d.tracks && typeof d.tracks === "object" ? (d.tracks as Record<string, unknown>) : {};
+      const pick = (list: unknown) => {
+        const out: Array<[number, number]> = [];
+        if (!Array.isArray(list)) return out;
+        for (const raw of list) {
+          const p = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+          if (!p) continue;
+          const la = Number(p.lat ?? p.latitude);
+          const lo = Number(p.lon ?? p.lng ?? p.longitude);
+          if (Number.isFinite(la) && Number.isFinite(lo) && la !== 0 && lo !== 0) out.push([la, lo]);
+        }
+        return out;
+      };
+      const aircraft = pick(Array.isArray(tracks.aircraft) ? tracks.aircraft : Array.isArray(d.track) ? d.track : []);
+      const operator = pick(Array.isArray(tracks.operator) ? tracks.operator : []);
+      // 回填历史轨迹（已加载则此调用只覆盖轨迹线）
+      if (aircraft.length) {
+        ensureAircraftLine().setLatLngs(aircraft);
+        selLastPt = aircraft[aircraft.length - 1];
+      }
+      if (operator.length >= 2) {
+        L.polyline(operator, { color: "#e67e22", weight: 2, opacity: 0.8 }).addTo(trackLayer);
+      }
+      if (operator.length) {
+        ensurePilotMark().setLatLng(operator[operator.length - 1]);
+      } else {
+        const lp = liveRow(sn);
+        const pil = livePilot(lp);
+        if (pil) ensurePilotMark().setLatLng(pil);
+      }
+    } catch (_e) {
+      /* 保留实时绘制即可 */
+    }
+  })();
 }
+
+/* ---------- 无人机标记 ---------- */
 
 function applyDrones() {
   if (!map) return;
@@ -370,7 +404,7 @@ function applyDrones() {
         .addTo(map)
         .bindTooltip(tooltip, { sticky: true })
         .on("click", () => {
-          void selectDrone(sn);
+          selectDrone(sn);
         });
       droneMarkers.set(sn, mk);
     }
@@ -381,9 +415,14 @@ function applyDrones() {
       map.removeLayer(mk);
       droneMarkers.delete(sn);
       prevPos.delete(sn);
-      if (sn === selectedSn) clearTrackLayer();
+      if (sn === selectedSn) {
+        selectedSn = "";
+        clearTrackLayer();
+      }
     }
   }
+  // 被选中的目标持续续画轨迹
+  updateSelectedLive();
   if (!fittedOnce) {
     if (hasPos) {
       const pts: Array<[number, number]> = [];
@@ -404,10 +443,6 @@ function initMap() {
     L = lib;
     if (!mountEl.value) return;
     map = L.map(mountEl.value, { zoomControl: true, attributionControl: true, maxZoom: 30 });
-    map.on("click", () => {
-      selectedSn = "";
-      clearTrackLayer();
-    });
     applyTileLayer();
     const meta = META();
     const lat = Number(meta.base_lat);
@@ -441,7 +476,9 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", resize);
   droneMarkers.clear();
   prevPos.clear();
-  if (trackLayer) trackLayer = null;
+  trackLayer = null;
+  selAircraftLine = null;
+  selPilotMark = null;
   if (map) {
     try {
       map.remove();
