@@ -34,11 +34,11 @@ let riskHintEl: HTMLDivElement | null = null;
 const META = (): Record<string, unknown> => (props.state.meta ?? {}) as Record<string, unknown>;
 const DEFAULT_URL = "https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}";
 
-const hasLiveTargets = computed(() =>
-  (props.state.drones ?? []).some(
+function hasLiveTargets(): boolean {
+  return (props.state.drones ?? []).some(
     (d) => !d.lost && Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lon)),
-  ),
-);
+  );
+}
 
 function openSimulationModal() {
   window.dispatchEvent(new Event("xrs:open-simulation"));
@@ -474,7 +474,7 @@ watch(
 <template>
   <div class="live-map">
     <div ref="mountEl" class="map-mount"></div>
-    <div v-if="!hasLiveTargets" class="map-empty-hint">
+    <div v-if="!hasLiveTargets()" class="map-empty-hint">
       <p>暂无在线无人机</p>
       <button type="button" @click="openSimulationModal">模拟无人机</button>
     </div>
