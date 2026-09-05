@@ -284,7 +284,6 @@ async function simStop() {
             <button type="button" @click="openSim">模拟目标</button>
             <button type="button" @click="navTo('/logs')">日志</button>
             <button type="button" @click="navTo('/hardware-assistant')">硬件助手</button>
-            <button type="button" @click="openLegacy">旧版主控台对照</button>
           </div>
         </div>
       </div>
