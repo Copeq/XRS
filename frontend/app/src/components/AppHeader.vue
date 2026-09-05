@@ -80,10 +80,6 @@ function navTo(href: string) {
   moreOpen.value = false;
   window.location.href = href;
 }
-function openLegacy() {
-  moreOpen.value = false;
-  window.open("/?desktop=1", "_blank", "noopener,noreferrer");
-}
 
 /* 通知中心 */
 interface NotifyItem {
