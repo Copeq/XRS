@@ -303,15 +303,11 @@ function drawLiveImmediately(sn: string): boolean {
   const pts = livePoint(live);
   if (!pts) return false;
   ensureTrackLayer();
-  const all: Array<[number, number]> = [];
   circle(pts, "#2f81f7", "无人机(实时)");
-  all.push(pts);
   const pilot = livePilot(live);
   if (pilot) {
     circle(pilot, "#e67e22", "飞手位置(实时)");
-    all.push(pilot);
   }
-  fitTo(all);
   return true;
 }
 

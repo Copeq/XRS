@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { postJson, pageFetch } from "../composables/pageApi";
 import type { HomeState } from "../composables/useLiveSocket";
 
