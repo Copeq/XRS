@@ -264,49 +264,88 @@ function circle(pos: [number, number], color: string, tooltip?: string) {
   return m;
 }
 
+function liveRow(sn: string) {
+  return (props.state.drones ?? []).find((d) => String(d.sn ?? "") === sn);
+}
+
+function livePoint(live: DroneRow | undefined): [number, number] | null {
+  if (!live) return null;
+  const lat = Number(live.lat);
+  const lon = Number(live.lon);
+  return Number.isFinite(lat) && Number.isFinite(lon) ? [lat, lon] : null;
+}
+
+function livePilot(live: DroneRow | undefined): [number, number] | null {
+  if (!live) return null;
+  const pl = Number((live as unknown as Record<string, unknown>).pilot_lat);
+  const po = Number((live as unknown as Record<string, unknown>).pilot_lon);
+  return Number.isFinite(pl) && Number.isFinite(po) ? [pl, po] : null;
+}
+
+function ensureTrackLayer() {
+  if (!trackLayer) trackLayer = L.layerGroup().addTo(map);
+  return trackLayer;
+}
+
+function fitTo(all: Array<[number, number]>) {
+  if (map && all.length) map.fitBounds(L.latLngBounds(all), { padding: [32, 32] });
+}
+
+// 同步立即绘制：基于实时行先显示无人机/飞手当前点，不等网络
+function drawLiveImmediately(sn: string): boolean {
+  const live = liveRow(sn);
+  const pts = livePoint(live);
+  if (!pts) return false;
+  ensureTrackLayer();
+  const all: Array<[number, number]> = [];
+  circle(pts, "#2f81f7", "无人机(实时)");
+  all.push(pts);
+  const pilot = livePilot(live);
+  if (pilot) {
+    circle(pilot, "#e67e22", "飞手位置(实时)");
+    all.push(pilot);
+  }
+  fitTo(all);
+  return true;
+}
+
+function drawDetailed(sn: string, aircraft: Array<[number, number]>, operator: Array<[number, number]>) {
+  clearTrackLayer();
+  ensureTrackLayer();
+  const all: Array<[number, number]> = [];
+  const style = (c: string) => ({ color: c, weight: 3, fillOpacity: 0 });
+  if (aircraft.length >= 2) {
+    L.polyline(aircraft, style("#2f81f7")).addTo(trackLayer);
+  } else if (aircraft.length === 1) {
+    circle(aircraft[0], "#2f81f7", "无人机");
+  }
+  if (operator.length) {
+    if (operator.length >= 2) L.polyline(operator, style("#e67e22")).addTo(trackLayer);
+    circle(operator[operator.length - 1], "#e67e22", "飞手位置");
+  }
+  all.push(...aircraft);
+  all.push(...operator);
+  if (all.length) {
+    fitTo(all);
+  } else {
+    drawLiveImmediately(sn);
+  }
+}
+
 async function selectDrone(sn: string) {
   if (!map) return;
   const seq = ++selectSeq;
   selectedSn = sn;
-  clearTrackLayer();
+  // 1) 同步先画实时点，立即有反馈
+  if (!drawLiveImmediately(sn)) clearTrackLayer();
+  // 2) 异步拉详情后替换为完整轨迹
   try {
     const { aircraft, operator } = await fetchDroneTracks(sn);
     if (!map || seq !== selectSeq || selectedSn !== sn) return;
-    trackLayer = L.layerGroup().addTo(map);
-    const all: Array<[number, number]> = [];
-    const style = (c: string) => ({ color: c, weight: 3, fillOpacity: 0 });
-    if (aircraft.length >= 2) {
-      L.polyline(aircraft, style("#2f81f7")).addTo(trackLayer);
-    } else if (aircraft.length === 1) {
-      circle(aircraft[0], "#2f81f7", "无人机");
-    }
-    if (operator.length) {
-      if (operator.length >= 2) L.polyline(operator, style("#e67e22")).addTo(trackLayer);
-      circle(operator[operator.length - 1], "#e67e22", "飞手位置");
-    }
-    all.push(...aircraft);
-    all.push(...operator);
-    // 接口返回无有效点时回退到实时行数据（含实时飞手坐标）
-    if (!all.length) {
-      const live = (props.state.drones ?? []).find((d) => String(d.sn ?? "") === sn);
-      if (live && Number.isFinite(Number(live.lat)) && Number.isFinite(Number(live.lon))) {
-        all.push([Number(live.lat), Number(live.lon)]);
-        circle([Number(live.lat), Number(live.lon)], "#2f81f7", "无人机(实时)");
-        const pl = Number((live as unknown as Record<string, unknown>).pilot_lat);
-        const po = Number((live as unknown as Record<string, unknown>).pilot_lon);
-        if (Number.isFinite(pl) && Number.isFinite(po)) {
-          all.push([pl, po]);
-          circle([pl, po], "#e67e22", "飞手位置(实时)");
-        }
-      }
-    }
-    if (all.length) {
-      map.fitBounds(L.latLngBounds(all), { padding: [32, 32] });
-    }
+    drawDetailed(sn, aircraft, operator);
   } catch (_e) {
+    // 保留同步已画的实时点即可
     if (!map || seq !== selectSeq || selectedSn !== sn) return;
-    clearTrackLayer();
-    selectedSn = "";
   }
 }
 
