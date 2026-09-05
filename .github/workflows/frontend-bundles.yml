@@ -1,0 +1,39 @@
+name: Frontend Bundle Check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  bundles:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Rebuild frontend bundles
+        working-directory: frontend
+        run: node build-rid-home.mjs
+
+      - name: Verify generated assets are committed
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- \
+            station_edition/xrs/assets/vue \
+            station_edition/xrs/assets/templates/station-settings.html

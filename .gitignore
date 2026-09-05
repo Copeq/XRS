@@ -1,0 +1,69 @@
+# Python cache / env
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.codex
+CODEX.md
+build
+dist/
+release/
+*.spec
+# Runtime config (contains secrets)
+rid_config.json
+config.json
+station_edition/config.json
+rid_config.json.rollback
+config.json.rollback
+station_edition/config.json.rollback
+*.rollback
+*.rollback.*
+rid_config.local.json
+*.secrets.json
+viewer/cfg.db
+viewer/cfg.db-*
+cfg.db
+cfg.db-*
+_tmp_viewer*.log
+EULA.set
+tools
+# Runtime data
+rid_history_cache.json
+history-cache.json
+station_edition/history-cache.json
+*_history_cache.json
+host_metrics.jsonl
+host_metrics.jsonl.tmp
+xrs_scanner/
+oui.txt
+rid-n/ridn_config.json
+rid-n/**/*.runtime.json
+rid-n/data/
+rid-n/certs/
+# Local temporary / backup artifacts
+backups/
+*.tmp
+*.broken.*
+run.py.bak_*
+*.bak_*
+_remote_*.sh
+_page_extracted.*
+memory.txt
+_moji_tokens.txt
+run.py.bak_mojibake
+_codex_context/
+tools/pi.local.json
+tools/__pycache__/
+plugins
+frontend/node_modules/
+node_modules/
+# Runtime history store (never commit)
+rid_storage.db
+rid_storage.db-shm
+rid_storage.db-wal
+# Local dev/demo logs
+run_demo.log
+# OS / editor
+.DS_Store
+Thumbs.db

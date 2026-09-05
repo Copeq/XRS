@@ -1,0 +1,3 @@
+# Runtime dependencies for run.py
+scapy
+windows-curses; platform_system == "Windows"

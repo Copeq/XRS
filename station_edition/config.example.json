@@ -1,0 +1,140 @@
+{
+  "basic": {
+    "iface": null,
+    "channel": null,
+    "hop": false,
+    "hop_5g": false,
+    "scan_wifi_fast": false,
+    "auto_self_heal": true,
+    "dwell_2g": 250,
+    "dwell_5g": 800,
+    "settle": 30,
+    "dwell_on_hit": 2500,
+    "hit_cap": 6000,
+    "time": 1.0,
+    "min_gap": 0.5,
+    "lost_timeout": 15,
+    "track_points_limit": 12000,
+    "rssi_delta": 3,
+    "change_on_rssi": false,
+    "change_on_payload": false,
+    "model_map": "rid_model.json",
+    "history_file": "rid_storage.db",
+    "no_tui": true,
+    "debug": false
+  },
+  "notify": {
+    "enabled": true,
+    "only_online": true,
+    "notify_reonline": true,
+    "reonline_cooldown_sec": 300,
+    "skip_mac_only": true,
+    "send_timeout_sec": 8,
+    "wecom_webhook_key": "",
+    "wecom_webhooks": [
+      {
+        "name": "默认通道",
+        "enabled": true,
+        "key": ""
+      }
+    ]
+  },
+  "web": {
+    "dji_lookup_url": "https://repair.dji.com/device/search?re=cn&lang=zh-CN",
+    "allow_restart": true,
+    "last_restart_args": "",
+    "scan_type_rid": "RID报送",
+    "scan_type_phone": "手机快传",
+    "sn_source_rid": "RID包",
+    "sn_source_ssid": "SSID",
+    "base_name": "基站",
+    "base_lat": null,
+    "base_lon": null,
+    "base_zoom": 13,
+    "heading_ref_deg": 0.0,
+    "map_auto_center_idle_sec": 20,
+    "map_tile_url": "",
+    "map_tile_subdomains": "",
+    "map_tile_attribution": "",
+    "map_tile_max_native_zoom": 18,
+    "alarm_zone": {
+      "enabled": false,
+      "lat1": null,
+      "lon1": null,
+      "lat2": null,
+      "lon2": null,
+      "name": "报警区域"
+    },
+    "alarm_zones": [
+      {
+        "enabled": false,
+        "lat1": null,
+        "lon1": null,
+        "lat2": null,
+        "lon2": null,
+        "name": "报警区域 1"
+      }
+    ]
+  },
+  "ap": {
+    "list_max": 80,
+    "vendor_db_file": "oui.txt",
+    "vendor_auto_download": true
+  },
+  "auth": {
+    "enabled": false,
+    "username_hash": "",
+    "password_hash": "",
+    "realm": "XRS",
+    "session_ttl_min": 30,
+    "login_methods": [
+      "password",
+      "passkey"
+    ],
+    "sso_links": [],
+    "passkeys": []
+  },
+  "api": {
+    "enabled": false,
+    "token": "",
+    "token_hash": "",
+    "tokens": [],
+    "whitelist_enabled": false,
+    "whitelist": []
+  },
+  "model_update": {
+    "enabled": true,
+    "url": "https://raw.githubusercontent.com/Copeq/XRS/refs/heads/main/rid_model.json"
+  },
+  "config_update": {
+    "enabled": false,
+    "url": ""
+  },
+  "app_update": {
+    "enabled": true,
+    "release_url": "https://api.github.com/repos/Copeq/XRS/releases/latest"
+  },
+  "metrics": {
+    "enabled": false,
+    "retention_days": 7,
+    "temperature_source": "auto"
+  },
+  "network_bindings": {
+    "items": [
+      {
+        "iface": "wlan0",
+        "role": "scan"
+      }
+    ],
+    "ap": {
+      "ssid": "XRS-HotSpot",
+      "password": "",
+      "channel": 6,
+      "address": "172.16.0.1",
+      "cidr": "172.16.0.1/24",
+      "dhcp_start": "172.16.0.20",
+      "dhcp_end": "172.16.0.240",
+      "http_port": 80
+    }
+  }
+}
