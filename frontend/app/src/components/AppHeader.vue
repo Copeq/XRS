@@ -54,12 +54,21 @@ function ignoreSecBanner() {
     /* noop */
   }
 }
+function onOpenSimulation() {
+  void openSim();
+}
+
 onMounted(() => {
   try {
     secIgnored.value = window.localStorage.getItem("lr_sec_banner_ignored") === "1";
   } catch (_e) {
     secIgnored.value = false;
   }
+  window.addEventListener("xrs:open-simulation", onOpenSimulation);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("xrs:open-simulation", onOpenSimulation);
 });
 
 function openDji() {

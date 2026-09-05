@@ -34,6 +34,16 @@ let riskHintEl: HTMLDivElement | null = null;
 const META = (): Record<string, unknown> => (props.state.meta ?? {}) as Record<string, unknown>;
 const DEFAULT_URL = "https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}";
 
+const hasLiveTargets = computed(() =>
+  (props.state.drones ?? []).some(
+    (d) => !d.lost && Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lon)),
+  ),
+);
+
+function openSimulationModal() {
+  window.dispatchEvent(new Event("xrs:open-simulation"));
+}
+
 function loadLeaflet(): Promise<unknown> {
   const win = window as unknown as Record<string, unknown>;
   if (win.L) return Promise.resolve(win.L);
@@ -287,10 +297,6 @@ function ensureTrackLayer() {
   return trackLayer;
 }
 
-function fitTo(all: Array<[number, number]>) {
-  if (map && all.length) map.fitBounds(L.latLngBounds(all), { padding: [32, 32] });
-}
-
 // 同步立即绘制：基于实时行先显示无人机/飞手当前点，不等网络
 function drawLiveImmediately(sn: string): boolean {
   const live = liveRow(sn);
@@ -312,7 +318,6 @@ function drawLiveImmediately(sn: string): boolean {
 function drawDetailed(sn: string, aircraft: Array<[number, number]>, operator: Array<[number, number]>) {
   clearTrackLayer();
   ensureTrackLayer();
-  const all: Array<[number, number]> = [];
   const style = (c: string) => ({ color: c, weight: 3, fillOpacity: 0 });
   if (aircraft.length >= 2) {
     L.polyline(aircraft, style("#2f81f7")).addTo(trackLayer);
@@ -323,11 +328,7 @@ function drawDetailed(sn: string, aircraft: Array<[number, number]>, operator: A
     if (operator.length >= 2) L.polyline(operator, style("#e67e22")).addTo(trackLayer);
     circle(operator[operator.length - 1], "#e67e22", "飞手位置");
   }
-  all.push(...aircraft);
-  all.push(...operator);
-  if (all.length) {
-    fitTo(all);
-  } else {
+  if (!aircraft.length && !operator.length) {
     drawLiveImmediately(sn);
   }
 }
@@ -477,6 +478,10 @@ watch(
 <template>
   <div class="live-map">
     <div ref="mountEl" class="map-mount"></div>
+    <div v-if="!hasLiveTargets" class="map-empty-hint">
+      <p>暂无在线无人机</p>
+      <button type="button" @click="openSimulationModal">模拟无人机</button>
+    </div>
   </div>
 </template>
 
@@ -492,6 +497,37 @@ watch(
 .map-mount {
   position: absolute;
   inset: 0;
+}
+
+.map-empty-hint {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 600;
+  background: color-mix(in srgb, var(--card) 94%, var(--txt) 6%);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+}
+
+.map-empty-hint p {
+  margin: 0;
+}
+
+.map-empty-hint button {
+  border: 1px solid var(--blue);
+  background: var(--blue);
+  color: #fff;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .live-map :deep(.map-api-risk) {
