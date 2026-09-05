@@ -38,11 +38,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     steps:
-        if: ${{ env.CI_REPO_TOKEN == '' }}
-        shell: bash
-        run: |
-          echo "CI_REPO_TOKEN is required for checkout in this repository."
-          exit 1
 
       - name: Checkout code with CI token
         uses: actions/checkout@v5
@@ -111,11 +106,6 @@ jobs:
       CI_REPO_TOKEN: ${{ secrets.CI_REPO_TOKEN }}
 
     steps:
-        if: ${{ env.CI_REPO_TOKEN == '' }}
-        shell: bash
-        run: |
-          echo "CI_REPO_TOKEN is required for checkout in this repository."
-          exit 1
 
       - name: Checkout code with CI token
         uses: actions/checkout@v5
