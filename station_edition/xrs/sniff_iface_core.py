@@ -70,8 +70,10 @@ def _sniff_health_meta(now_mono: float, now_wall: float) -> dict:
         "last_err_at": _fmt_wall_ts(last_err_wall if last_err_wall > 0 else None),
     }
 
+_sniff_no_monitor_warn_wall = 0.0
+
 def _sniff_recover_iface(iface: str, reason: str, force: bool = False) -> bool:
-    global sniff_last_recover_wall, sniff_iface_name
+    global sniff_last_recover_wall, sniff_iface_name, _sniff_no_monitor_warn_wall
     iface = str(iface or "").strip()
     if not iface:
         _sniff_note_error(f"iface empty: {reason}")
@@ -82,6 +84,25 @@ def _sniff_recover_iface(iface: str, reason: str, force: bool = False) -> bool:
             return False
         sniff_last_recover_wall = now_wall
         sniff_iface_name = iface
+    # 0) iface must actually exist before we touch the system with ip/iw.
+    if not os.path.isdir(os.path.join("/sys/class/net", iface)):
+        _sniff_note_error(f"iface not present: {iface}")
+        _log(f"[WARN] sniff iface not present: {iface}, skip reset")
+        return False
+    # 1) already in monitor -> nothing to fix, avoid needless interface flaps.
+    if _iface_mode_is_monitor(iface):
+        with sniff_health_lock:
+            sniff_iface_name = iface
+        return True
+    # 2) driver cannot ever reach monitor (FullMAC e.g. brcmfmac): refuse to run
+    #    the ip/iw reset chain every stall window on hardware that cannot sniff.
+    if not _iface_supports_monitor(iface):
+        msg = f"{iface} 不支持 monitor 模式（驱动可能为 FullMAC/brcmfmac），无法采集 Remote ID；请插入支持 monitor 的无线网卡后重新绑定"
+        _sniff_note_error(msg)
+        if now_wall - _sniff_no_monitor_warn_wall >= 600.0:
+            _sniff_no_monitor_warn_wall = now_wall
+            _log(f"[WARN] sniff {msg}")
+        return False
     _sniff_note_error(reason)
     _log(f"[WARN] sniff recover: {reason}, reset iface {iface}")
     steps = (
@@ -99,12 +120,13 @@ def _sniff_recover_iface(iface: str, reason: str, force: bool = False) -> bool:
             time.sleep(pause_sec)
     if current_channel:
         run_cmd(f"iw dev {iface} set channel {current_channel}", timeout=6)
-    info_raw = run_cmd(f"iw dev {iface} info")
-    if not info_raw or ("Interface" not in info_raw):
-        _sniff_note_error(f"iface unavailable: {iface}")
+    if not _iface_mode_is_monitor(iface):
+        _sniff_note_error(f"iface 未能进入 monitor 模式: {iface}")
+        _log(f"[WARN] sniff reset did not reach monitor: {iface}")
         return False
+    info_raw = run_cmd(f"iw dev {iface} info")
     info_lines = []
-    for ln in info_raw.splitlines():
+    for ln in (info_raw or "").splitlines():
         t = ln.strip()
         if re.search(r"\b(type|channel)\b", t):
             info_lines.append(t)
@@ -330,6 +352,12 @@ def _iface_options_snapshot() -> list[dict]:
             is_wireless = is_wireless or os.path.isdir(os.path.join("/sys/class/net", name, "wireless"))
         except Exception:
             pass
+        supports_monitor = bool(mode == "monitor")
+        if is_wireless and not supports_monitor:
+            try:
+                supports_monitor = bool(_iface_supports_monitor(name))
+            except Exception:
+                supports_monitor = False
         mac = ""
         state = ""
         try:
@@ -355,6 +383,7 @@ def _iface_options_snapshot() -> list[dict]:
             "name": str(name),
             "mode": str(mode or ""),
             "is_monitor": (str(mode or "") == "monitor"),
+            "supports_monitor": bool(supports_monitor),
             "is_wireless": bool(is_wireless),
             "is_loopback": str(name) == "lo",
             "state": state,
@@ -396,11 +425,33 @@ def _cfg_auto_self_heal() -> bool:
 def _sniff_pick_iface(prefer: str | None = None) -> str | None:
     iftypes = _sniff_iface_candidates()
     if not iftypes:
+        _sniff_note_error(NO_IFACE_DEGRADE_HINT)
         return None
+    prefer = str(prefer or "").strip() or None
+
+    def _capable(name: str) -> bool:
+        return bool(_iface_mode_is_monitor(name) or _iface_supports_monitor(name))
+
     if prefer and prefer in iftypes:
-        return prefer
+        if _capable(prefer):
+            return prefer
+        # Configured scan NIC physically cannot monitor -> surface the real reason
+        # instead of letting the watchdog flap it forever.
+        _sniff_note_error(
+            f"默认网卡 {prefer} 不支持 monitor 模式（驱动可能为 FullMAC/brcmfmac），"
+            "无法采集 Remote ID；请插入支持 monitor 的无线网卡后重新绑定"
+        )
+        for name in iftypes:
+            if name != prefer and _capable(name):
+                _log(f"[WARN] sniff 默认网卡 {prefer} 不支持 monitor，改用可用网卡 {name}")
+                return name
+        return None
     if prefer:
         _sniff_note_error(f"配置的默认网卡未检测到: {prefer}")
+        for name in iftypes:
+            if _capable(name):
+                _log(f"[WARN] sniff 默认网卡 {prefer} 缺失，改用可用网卡 {name}")
+                return name
         return None
     _sniff_note_error("未绑定默认网卡，请打开 OOBE 或设置页选择网卡")
     return None
@@ -475,6 +526,20 @@ def interface_detect(prefer: str | None = None) -> str | None:
 
     mode = iftypes.get(iface, "unknown")
     _log(f"[INFO] iface={iface} mode={mode}")
+    # Physical capability gate: a NIC that cannot reach monitor (FullMAC e.g.
+    # brcmfmac) can never capture Remote ID. Refuse it up front so startup and
+    # the watchdog surface the real reason instead of resetting it forever.
+    if mode != "monitor" and not _iface_supports_monitor(iface):
+        # Physical incapability is not a first-run binding problem: keep the rest
+        # of the station usable (history/web) and degrade capture with a clear
+        # reason instead of locking the whole UI behind OOBE.
+        msg = (
+            f"默认网卡 {iface} 不支持 monitor 模式（驱动可能为 FullMAC/brcmfmac），"
+            "无法采集 Remote ID；请插入支持 monitor 的无线网卡后重新绑定"
+        )
+        _log(f"[WARN] {msg}")
+        _sniff_note_error(msg)
+        return None
     if mode != "monitor":
         _log("[INFO] switching to monitor mode...")
         for c in (f"ip link set {iface} down",
@@ -483,6 +548,11 @@ def interface_detect(prefer: str | None = None) -> str | None:
             run_cmd(c)
         new = run_cmd(f"iw dev {iface} info | grep type").strip()
         _log(f"[INFO] monitor switch result: {new}")
+        if not re.search(r"^\s*type\s+monitor\b", new or "", re.MULTILINE):
+            msg = f"默认网卡 {iface} 未能切换到 monitor 模式（当前: {new or 'unknown'}）"
+            _log(f"[WARN] {msg}")
+            _sniff_note_error(msg)
+            return None
     run_cmd(f"iw dev {iface} set power_save off")
     ch_info = run_cmd(f"iw dev {iface} info | grep channel").strip()
     _log(f"[INFO] current channel: {ch_info or 'unknown'}")
@@ -495,6 +565,34 @@ def detect_5g(iface: str) -> bool:
     phy = run_cmd(f"iw phy{m.group(1)} info")
     if "Band 2:" in phy: return True
     return any(5000<=int(x)<=5999 for x in re.findall(r"\b(5\d{3})\s+MHz\b", phy))
+
+def _iface_mode_is_monitor(iface: str) -> bool:
+    info = run_cmd(f"iw dev {iface} info") or ""
+    return bool(re.search(r"^\s*type\s+monitor\b", info, re.MULTILINE))
+
+def _iface_phy_id(iface: str) -> int | None:
+    info = run_cmd(f"iw dev {iface} info") or ""
+    m = re.search(r"\bwiphy\s+(\d+)", info)
+    return int(m.group(1)) if m else None
+
+def _iface_supports_monitor(iface: str) -> bool:
+    """True if the NIC is already in monitor, or its driver/phy advertises
+    monitor among supported interface modes. FullMAC drivers (e.g. brcmfmac,
+    many SDIO/USB chips) never list monitor -> Remote ID capture impossible."""
+    try:
+        if _iface_mode_is_monitor(iface):
+            return True
+        phy = _iface_phy_id(iface)
+        if phy is None:
+            return False
+        info = run_cmd(f"iw phy{phy} info") or ""
+        block = ""
+        m = re.search(r"Supported interface modes:(.*?)(?:\n\s*\n|\Z)", info, re.DOTALL)
+        if m:
+            block = m.group(1)
+        return bool(re.search(r"^\s*\*\s*monitor\b", block or info, re.MULTILINE))
+    except Exception:
+        return False
 
 # -----------------------------------------------------------------------------
 # Channel hopper

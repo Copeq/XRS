@@ -390,6 +390,7 @@ def main() -> None:
         iface_watch_since = time.monotonic() if iface_cur else 0.0
         hop_started = bool(args.hop and bool(iface))
         simulation_was_paused = False
+        last_degrade_log = 0.0
 
         def note_recover_failure(reason: str, allow_restart: bool = True) -> None:
             nonlocal recover_fail_count
@@ -439,12 +440,15 @@ def main() -> None:
                         if current_channel:
                             run_cmd(f"iw dev {iface_cur} set channel {current_channel}")
                 else:
-                    _sniff_note_error(NO_IFACE_DEGRADE_HINT)
-                    # Missing/unconfigured NIC should surface as a stable degraded state,
-                    # not a self-restart loop.
+                    # Missing / monitor-incapable NIC surfaces as a stable degraded
+                    # state (detailed reason already set by _sniff_pick_iface), with
+                    # throttled logging, not a self-restart loop or a busy reset flail.
                     note_recover_failure("no iface available", allow_restart=False)
-                    _log(f"[WARN] sniff no available iface, retry in {retry_delay:.0f}s")
-                    time.sleep(retry_delay)
+                    now_wall_d = time.time()
+                    if now_wall_d - last_degrade_log >= 600.0:
+                        last_degrade_log = now_wall_d
+                        _log("[WARN] sniff no usable capture iface, retry in 5s (see sniff status for detail)")
+                    time.sleep(5.0)
                     continue
 
             try:
@@ -468,7 +472,9 @@ def main() -> None:
                         set_iface_watch(iface_cur)
                         note_recover_success()
                     else:
-                        note_recover_failure(f"worker hung on {iface_cur}", allow_restart=True)
+                        # Never self-restart when the bound NIC physically cannot
+                        # capture (FullMAC/brcmfmac) - recovery is not the fix.
+                        note_recover_failure(f"worker hung on {iface_cur}", allow_restart=_iface_supports_monitor(iface_cur))
                     time.sleep(retry_delay)
                     continue
                 if state != "ok":
@@ -509,7 +515,7 @@ def main() -> None:
                         set_iface_watch(iface_cur)
                         note_recover_success()
                     else:
-                        note_recover_failure(stall_reason, allow_restart=True)
+                        note_recover_failure(stall_reason, allow_restart=_iface_supports_monitor(iface_cur))
                 else:
                     note_recover_success()
                 time.sleep(0.05)
