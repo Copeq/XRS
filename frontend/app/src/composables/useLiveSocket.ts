@@ -12,6 +12,7 @@ export interface DroneRow {
   spd?: number | null;
   age_text?: string;
   age?: number;
+  first_seen?: string;
   last_seen?: string;
   capture_time?: string;
   lost?: boolean;
