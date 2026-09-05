@@ -61,25 +61,29 @@ function logCls(row: unknown): string {
         </section>
 
         <section class="panel list-panel">
-          <h2>实时飞机列表
+          <h2>实时无人机列表
             <span class="count">{{ liveRows.length }}</span>
           </h2>
           <div class="live-cards">
             <div v-for="d in liveRows" :key="d.sn" class="live-card" :data-sn="d.sn">
-              <div class="card-head">
-                <span class="sn mono" :title="text(d.sn)">{{ d.sn }}</span>
-                <span class="model">{{ text(d.model, "N/A") }}</span>
-              </div>
               <div class="card-grid">
-                <span class="k">信号</span><span :class="rssiCls(d)">{{ d.rssi == null ? "-" : `${d.rssi} dBm` }}</span>
-                <span class="k">包</span><span>{{ text(d.pkts, "0") }}</span>
-                <span class="k">方向</span><span>{{ text(d.dir) }}</span>
-                <span class="k">数据更新</span><span>{{ text(d.age_text) }}</span>
-                <span class="k">末次发现</span><span>{{ text(d.last_seen) }}</span>
-                <span class="k">UAS ID</span><span class="mono">{{ text(d.uas_id, "-") }}</span>
+                <span class="k">品牌+型号</span>
+                <span class="v brand">{{ text(d.model, "N/A") }}</span>
+                <span class="k">信号强度</span>
+                <span class="v" :class="rssiCls(d)">{{ d.rssi == null ? "-" : `${d.rssi} dBm` }}</span>
+                <span class="k">信号包数</span>
+                <span class="v">{{ text(d.pkts, "0") }}</span>
+                <span class="k">首次发现</span>
+                <span class="v">{{ text(d.first_seen) }}</span>
+                <span class="k">末次发现</span>
+                <span class="v">{{ text(d.last_seen) }}</span>
+                <span class="k">UAS ID</span>
+                <span class="v mono">{{ text(d.uas_id, "-") }}</span>
+                <span class="k">序列号</span>
+                <span class="v mono" :title="text(d.sn)">{{ text(d.sn) }}</span>
               </div>
             </div>
-            <div v-if="!liveRows.length" class="empty">暂无在线飞机（可在「更多 → 模拟目标」启动内存仿真验证）。</div>
+            <div v-if="!liveRows.length" class="empty">暂无在线无人机（可在「更多 → 模拟目标」启动内存仿真验证）。</div>
           </div>
         </section>
       </div>
@@ -235,6 +239,15 @@ function logCls(row: unknown): string {
 
 .card-grid .k {
   color: var(--muted);
+}
+
+.card-grid .v {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.card-grid .v.brand {
+  font-weight: 700;
 }
 
 .sig.good {
