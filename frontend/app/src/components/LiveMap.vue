@@ -249,36 +249,62 @@ function clearTrackLayer() {
   }
 }
 
+let selectSeq = 0;
+
+function circle(pos: [number, number], color: string, tooltip?: string) {
+  const m = L.circleMarker(pos, {
+    radius: 6,
+    color,
+    weight: 2,
+    fillColor: color,
+    fillOpacity: 0.6,
+  });
+  if (tooltip) m.bindTooltip(tooltip, { sticky: true });
+  m.addTo(trackLayer);
+  return m;
+}
+
 async function selectDrone(sn: string) {
   if (!map) return;
+  const seq = ++selectSeq;
   selectedSn = sn;
   clearTrackLayer();
   try {
-    const { item, aircraft, operator } = await fetchDroneTracks(sn);
+    const { aircraft, operator } = await fetchDroneTracks(sn);
+    if (!map || seq !== selectSeq || selectedSn !== sn) return;
     trackLayer = L.layerGroup().addTo(map);
     const all: Array<[number, number]> = [];
     const style = (c: string) => ({ color: c, weight: 3, fillOpacity: 0 });
     if (aircraft.length >= 2) {
       L.polyline(aircraft, style("#2f81f7")).addTo(trackLayer);
+    } else if (aircraft.length === 1) {
+      circle(aircraft[0], "#2f81f7", "无人机");
     }
     if (operator.length) {
-      L.polyline(operator, style("#e67e22")).addTo(trackLayer);
-      L.circleMarker(operator[operator.length - 1], {
-        radius: 6,
-        color: "#e67e22",
-        weight: 2,
-        fillColor: "#e67e22",
-        fillOpacity: 0.6,
-      })
-        .bindTooltip("飞手位置")
-        .addTo(trackLayer);
+      if (operator.length >= 2) L.polyline(operator, style("#e67e22")).addTo(trackLayer);
+      circle(operator[operator.length - 1], "#e67e22", "飞手位置");
     }
     all.push(...aircraft);
     all.push(...operator);
+    // 接口返回无有效点时回退到实时行数据（含实时飞手坐标）
+    if (!all.length) {
+      const live = (props.state.drones ?? []).find((d) => String(d.sn ?? "") === sn);
+      if (live && Number.isFinite(Number(live.lat)) && Number.isFinite(Number(live.lon))) {
+        all.push([Number(live.lat), Number(live.lon)]);
+        circle([Number(live.lat), Number(live.lon)], "#2f81f7", "无人机(实时)");
+        const pl = Number((live as unknown as Record<string, unknown>).pilot_lat);
+        const po = Number((live as unknown as Record<string, unknown>).pilot_lon);
+        if (Number.isFinite(pl) && Number.isFinite(po)) {
+          all.push([pl, po]);
+          circle([pl, po], "#e67e22", "飞手位置(实时)");
+        }
+      }
+    }
     if (all.length) {
-      map.fitBounds(L.latLngBounds(all), { padding: [28, 28] });
+      map.fitBounds(L.latLngBounds(all), { padding: [32, 32] });
     }
   } catch (_e) {
+    if (!map || seq !== selectSeq || selectedSn !== sn) return;
     clearTrackLayer();
     selectedSn = "";
   }
