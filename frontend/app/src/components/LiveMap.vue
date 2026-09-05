@@ -278,11 +278,6 @@ async function selectDrone(sn: string) {
     if (all.length) {
       map.fitBounds(L.latLngBounds(all), { padding: [28, 28] });
     }
-    const name = String(item.model ?? "");
-    L.popup()
-      .setLatLng(L.latLng(all.length ? all[all.length - 1] : [Number(item.lat) || 30, Number(item.lon) || 114]))
-      .setContent(`<b>${sn}</b>${name ? "<br/>" + name : ""}<br/>轨迹点 ${aircraft.length} · 飞手 ${operator.length ? "有" : "无"}`)
-      .openOn(map);
   } catch (_e) {
     clearTrackLayer();
     selectedSn = "";
@@ -312,7 +307,6 @@ function applyDrones() {
       const mk = L.marker([lat, lon], { icon: droneArrowIcon(deg, color) })
         .addTo(map)
         .bindTooltip(tooltip, { sticky: true })
-        .bindPopup(`<b>${sn}</b><br/>${String(d.model ?? "N/A")}<br/><i>点击图标查看实时轨迹与飞手位置</i>`)
         .on("click", () => {
           void selectDrone(sn);
         });
