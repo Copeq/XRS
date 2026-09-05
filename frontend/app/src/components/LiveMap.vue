@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch } from "vue";
-import type { HomeState } from "../composables/useLiveSocket";
+import type { HomeState, DroneRow } from "../composables/useLiveSocket";
+import { pageFetch } from "../composables/pageApi";
 
-// 与旧版一致：运行时同源加载站端自带的 /assets/leaflet/leaflet.{js,css}，
-// 不参与前端 bundle，避免重复打包与图标资源处理。
+// 与旧版一致：运行时同源加载站端自带 /assets/leaflet/leaflet.{js,css}
 const LEAF_CSS = "/assets/leaflet/leaflet.css";
 const LEAF_JS = "/assets/leaflet/leaflet.js";
 
@@ -24,6 +24,11 @@ let zoneLayer: any = null;
 let zoneSig = "";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const droneMarkers = new Map<string, any>();
+const prevPos = new Map<string, { lat: number; lon: number }>();
+let fittedOnce = false;
+let selectedSn = "";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let trackLayer: any = null;
 let riskHintEl: HTMLDivElement | null = null;
 
 const META = (): Record<string, unknown> => (props.state.meta ?? {}) as Record<string, unknown>;
@@ -109,13 +114,16 @@ function baseIcon() {
     '<path d="M12 6.3v10.2M9.4 17.1h5.2M10.2 10.8L12 9l1.8 1.8M9.8 8.5c.9-.92 2.05-1.38 3.2-1.38 1.15 0 2.3.46 3.2 1.38M8.3 7c1.32-1.34 3.03-2.01 4.74-2.01 1.71 0 3.42.67 4.74 2.01" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.35" fill="none"/>' +
     '<path d="M10.8 16.6l-1.15 2.3M13.2 16.6l1.15 2.3" stroke="#fff" stroke-linecap="round" stroke-width="1.2"/>' +
     "</svg>";
-  return L.divIcon({
-    html: svg,
-    className: "",
-    iconSize: [48, 48],
-    iconAnchor: [24, 24],
-    popupAnchor: [0, -22],
-  });
+  return L.divIcon({ html: svg, className: "", iconSize: [48, 48], iconAnchor: [24, 24], popupAnchor: [0, -22] });
+}
+
+function droneArrowIcon(deg: number, color: string) {
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 26 26">` +
+    `<g transform="rotate(${deg} 13 13)">` +
+    `<path d="M13 1.5 L21 23 L13 17.5 L5 23 Z" fill="${color}" stroke="#fff" stroke-width="1" opacity="0.95"/>` +
+    `</g></svg>`;
+  return L.divIcon({ html: svg, className: "", iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -12] });
 }
 
 function applyBaseMarker() {
@@ -189,72 +197,179 @@ function syncRiskHint() {
   riskHintEl.textContent = "未配置地图 API，当前使用默认在线底图，可能存在法律风险；请勿暴露公网或商业使用。";
 }
 
+function bearingDeg(aLat: number, aLon: number, bLat: number, bLon: number): number {
+  const rad = Math.PI / 180;
+  const phi1 = aLat * rad;
+  const phi2 = bLat * rad;
+  const dLon = (bLon - aLon) * rad;
+  const y = Math.sin(dLon) * Math.cos(phi2);
+  const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+function droneHeading(d: DroneRow, lat: number, lon: number): number {
+  const tracked = Number((d as unknown as Record<string, unknown>).track_deg);
+  if (Number.isFinite(tracked)) return ((tracked % 360) + 360) % 360;
+  const prev = prevPos.get(String(d.sn ?? ""));
+  if (prev) {
+    const dist = Math.abs(prev.lat - lat) + Math.abs(prev.lon - lon);
+    if (dist > 1e-7) return bearingDeg(prev.lat, prev.lon, lat, lon);
+  }
+  return 0;
+}
+
+async function fetchDroneTracks(sn: string) {
+  const d = (await pageFetch(
+    `/api/drones/get?sn=${encodeURIComponent(sn)}&include_tracks=1`,
+  )) as Record<string, unknown>;
+  const tracks = d.tracks && typeof d.tracks === "object" ? (d.tracks as Record<string, unknown>) : {};
+  const pick = (list: unknown) => {
+    const out: Array<[number, number]> = [];
+    if (!Array.isArray(list)) return out;
+    for (const raw of list) {
+      const p = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+      if (!p) continue;
+      const lat = Number(p.lat ?? p.latitude);
+      const lon = Number(p.lon ?? p.lng ?? p.longitude);
+      if (Number.isFinite(lat) && Number.isFinite(lon) && lat !== 0 && lon !== 0) out.push([lat, lon]);
+    }
+    return out;
+  };
+  return {
+    item: d && typeof d.item === "object" ? (d.item as Record<string, unknown>) : {},
+    aircraft: pick(Array.isArray(tracks.aircraft) ? tracks.aircraft : Array.isArray(d.track) ? d.track : []),
+    operator: pick(Array.isArray(tracks.operator) ? tracks.operator : []),
+  };
+}
+
+function clearTrackLayer() {
+  if (trackLayer) {
+    map.removeLayer(trackLayer);
+    trackLayer = null;
+  }
+}
+
+async function selectDrone(sn: string) {
+  if (!map) return;
+  selectedSn = sn;
+  clearTrackLayer();
+  try {
+    const { item, aircraft, operator } = await fetchDroneTracks(sn);
+    trackLayer = L.layerGroup().addTo(map);
+    const all: Array<[number, number]> = [];
+    const style = (c: string) => ({ color: c, weight: 3, fillOpacity: 0 });
+    if (aircraft.length >= 2) {
+      L.polyline(aircraft, style("#2f81f7")).addTo(trackLayer);
+    }
+    if (operator.length) {
+      L.polyline(operator, style("#e67e22")).addTo(trackLayer);
+      L.circleMarker(operator[operator.length - 1], {
+        radius: 6,
+        color: "#e67e22",
+        weight: 2,
+        fillColor: "#e67e22",
+        fillOpacity: 0.6,
+      })
+        .bindTooltip("飞手位置")
+        .addTo(trackLayer);
+    }
+    all.push(...aircraft);
+    all.push(...operator);
+    if (all.length) {
+      map.fitBounds(L.latLngBounds(all), { padding: [28, 28] });
+    }
+    const name = String(item.model ?? "");
+    L.popup()
+      .setLatLng(L.latLng(all.length ? all[all.length - 1] : [Number(item.lat) || 30, Number(item.lon) || 114]))
+      .setContent(`<b>${sn}</b>${name ? "<br/>" + name : ""}<br/>轨迹点 ${aircraft.length} · 飞手 ${operator.length ? "有" : "无"}`)
+      .openOn(map);
+  } catch (_e) {
+    clearTrackLayer();
+    selectedSn = "";
+  }
+}
+
 function applyDrones() {
   if (!map) return;
   const rows = props.state.drones ?? [];
   const seen = new Set<string>();
+  const hasPos = rows.some((d) => Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lon)));
   for (const d of rows) {
     const sn = String(d.sn ?? "");
     const lat = Number(d.lat);
     const lon = Number(d.lon);
     if (!sn || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
     seen.add(sn);
-    const color = d.lost ? "#9aa0a6" : "#2f81f7";
-    const radius = d.lost ? 5 : 6;
+    const color = d.lost ? "#9aa0a6" : "#2ea043";
+    const deg = droneHeading(d, lat, lon);
     const tooltip = `${sn}${d.model ? " · " + d.model : ""}`;
     const existing = droneMarkers.get(sn);
     if (existing) {
-      existing.setLatLng([lat, lon]).setStyle({ color, radius });
+      existing.setLatLng([lat, lon]).setIcon(droneArrowIcon(deg, color));
       const tip = existing.getTooltip?.();
       if (tip) tip.setContent(tooltip);
     } else {
-      const mk = L.circleMarker([lat, lon], {
-        radius,
-        color,
-        weight: 2,
-        fillColor: color,
-        fillOpacity: 0.45,
-      })
+      const mk = L.marker([lat, lon], { icon: droneArrowIcon(deg, color) })
         .addTo(map)
-        .bindTooltip(tooltip, { sticky: true });
+        .bindTooltip(tooltip, { sticky: true })
+        .bindPopup(`<b>${sn}</b><br/>${String(d.model ?? "N/A")}<br/><i>点击图标查看实时轨迹与飞手位置</i>`)
+        .on("click", () => {
+          void selectDrone(sn);
+        });
       droneMarkers.set(sn, mk);
     }
+    prevPos.set(sn, { lat, lon });
   }
   for (const [sn, mk] of Array.from(droneMarkers.entries())) {
     if (!seen.has(sn)) {
       map.removeLayer(mk);
       droneMarkers.delete(sn);
+      prevPos.delete(sn);
+      if (sn === selectedSn) clearTrackLayer();
+    }
+  }
+  if (!fittedOnce) {
+    if (hasPos) {
+      const pts: Array<[number, number]> = [];
+      for (const d of rows) {
+        const la = Number(d.lat);
+        const lo = Number(d.lon);
+        if (Number.isFinite(la) && Number.isFinite(lo)) pts.push([la, lo]);
+      }
+      if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [40, 40] });
+      fittedOnce = true;
     }
   }
 }
 
-async function initMap() {
+function initMap() {
   if (!mountEl.value || map) return;
-  try {
-    const lib = await loadLeaflet();
+  void loadLeaflet().then((lib) => {
     L = lib;
-  } catch (_e) {
-    if (mountEl.value) mountEl.value.textContent = "Leaflet 加载失败";
-    return;
-  }
-  if (!mountEl.value) return;
-  map = L.map(mountEl.value, { zoomControl: true, attributionControl: true, maxZoom: 30 });
-  applyTileLayer();
-  const meta = META();
-  const lat = Number(meta.base_lat);
-  const lon = Number(meta.base_lon);
-  const zoom = Number(meta.base_zoom ?? 13);
-  if (Number.isFinite(lat) && Number.isFinite(lon)) {
-    map.setView([lat, lon], Number.isFinite(zoom) ? zoom : 13);
-  } else {
-    map.setView([30, 114], 5);
-  }
-  applyBaseMarker();
-  applyZones();
-  syncRiskHint();
-  window.setTimeout(() => {
-    if (map) map.invalidateSize(false);
-  }, 60);
+    if (!mountEl.value) return;
+    map = L.map(mountEl.value, { zoomControl: true, attributionControl: true, maxZoom: 30 });
+    map.on("click", () => {
+      selectedSn = "";
+      clearTrackLayer();
+    });
+    applyTileLayer();
+    const meta = META();
+    const lat = Number(meta.base_lat);
+    const lon = Number(meta.base_lon);
+    const zoom = Number(meta.base_zoom ?? 13);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      map.setView([lat, lon], Number.isFinite(zoom) ? zoom : 13);
+    } else {
+      map.setView([30, 114], 5);
+    }
+    applyBaseMarker();
+    applyZones();
+    syncRiskHint();
+    applyDrones();
+    window.setTimeout(() => {
+      if (map) map.invalidateSize(false);
+    }, 60);
+  });
 }
 
 function resize() {
@@ -262,13 +377,15 @@ function resize() {
 }
 
 onMounted(() => {
-  void initMap();
+  initMap();
   window.addEventListener("resize", resize);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", resize);
   droneMarkers.clear();
+  prevPos.clear();
+  if (trackLayer) trackLayer = null;
   if (map) {
     try {
       map.remove();
