@@ -626,7 +626,7 @@ async function simStop() {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.4);
-  z-index: 100;
+  z-index: 2000;
   display: grid;
   place-items: center;
 }

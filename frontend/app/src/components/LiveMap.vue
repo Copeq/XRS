@@ -309,6 +309,8 @@ watch(
   flex: 1;
   position: relative;
   min-height: 320px;
+  z-index: 0;
+  isolation: isolate;
 }
 
 .map-mount {
