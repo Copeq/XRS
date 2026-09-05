@@ -8,11 +8,11 @@ Loaded into the assembled runtime namespace by runtime.py (see DEFAULT_CHUNK_FIL
 def _web_frontend_mode() -> str:
     """返回前端 UI 产物策略：vue（Vite 壳）/ legacy（web_server.py 模板）。
 
-    由 config.json 的 web.frontend 控制，缺省为 legacy，避免影响既有页面。
+    由 config.json 的 web.frontend 控制，缺省为 vue（新项目默认走新前端）。
     """
     cfg = WEB_CFG if isinstance(WEB_CFG, dict) else {}
     mode = str((cfg or {}).get("frontend") or "").strip().lower()
-    return mode if mode in ("vue", "legacy") else "legacy"
+    return mode if mode in ("vue", "legacy") else "vue"
 
 
 def _vue_frontend_enabled() -> bool:

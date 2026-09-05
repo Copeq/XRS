@@ -32,7 +32,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     steps:
-      - name: Require CI repo token
         if: ${{ env.CI_REPO_TOKEN == '' }}
         shell: bash
         run: |
@@ -42,7 +41,7 @@ jobs:
       - name: Checkout code with CI token
         uses: actions/checkout@v5
         with:
-          token: ${{ env.CI_REPO_TOKEN }}
+          token: ${{ secrets.CI_REPO_TOKEN || secrets.GITHUB_TOKEN }}
           ref: ${{ env.BUILD_REF }}
           fetch-depth: 0
 
@@ -123,7 +122,6 @@ jobs:
         edition: [station]
 
     steps:
-      - name: Require CI repo token
         if: ${{ env.CI_REPO_TOKEN == '' }}
         shell: bash
         run: |
@@ -133,7 +131,7 @@ jobs:
       - name: Checkout code with CI token
         uses: actions/checkout@v5
         with:
-          token: ${{ env.CI_REPO_TOKEN }}
+          token: ${{ secrets.CI_REPO_TOKEN || secrets.GITHUB_TOKEN }}
           ref: ${{ env.BUILD_REF }}
           fetch-depth: 0
 
@@ -226,7 +224,6 @@ jobs:
         edition: [station]
 
     steps:
-      - name: Require CI repo token
         if: ${{ env.CI_REPO_TOKEN == '' }}
         shell: bash
         run: |
@@ -236,7 +233,7 @@ jobs:
       - name: Checkout code with CI token
         uses: actions/checkout@v5
         with:
-          token: ${{ env.CI_REPO_TOKEN }}
+          token: ${{ secrets.CI_REPO_TOKEN || secrets.GITHUB_TOKEN }}
           ref: ${{ env.BUILD_REF }}
           fetch-depth: 0
 
