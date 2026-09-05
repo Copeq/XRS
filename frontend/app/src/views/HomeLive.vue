@@ -18,6 +18,7 @@ const liveRows = computed(() =>
     .sort((a, b) => (a.age ?? 0) - (b.age ?? 0)),
 );
 const sniffMsg = computed(() => String((state.meta as Record<string, unknown>).sniff_msg ?? "") || "-");
+const bottomMode = ref<"events" | "ap">("events");
 
 function text(value: unknown, fallback = "-"): string {
   if (value == null || value === "") return fallback;
@@ -84,14 +85,47 @@ function logCls(row: unknown): string {
       </div>
 
       <section class="panel log-panel">
-        <h2>事件/状态
-          <span class="muted-note">sniff: {{ sniffMsg }}</span>
-        </h2>
-        <div class="logbox">
+        <div class="panel-hdr">
+          <h2>
+            <button class="seg" :class="{ on: bottomMode === 'events' }" type="button" @click="bottomMode = 'events'">事件</button>
+            <button class="seg" :class="{ on: bottomMode === 'ap' }" type="button" @click="bottomMode = 'ap'">AP ({{ state.aps.length }})</button>
+          </h2>
+          <span class="muted-note" v-if="bottomMode === 'events'">sniff: {{ sniffMsg }}</span>
+        </div>
+
+        <div v-if="bottomMode === 'events'" class="logbox">
           <div v-for="(row, i) in state.logs" :key="i" :class="logCls(row)">{{ logLine(row) }}</div>
           <div v-if="!state.logs.length" class="ap empty-log">
             暂无事件。WS：{{ state.connected ? "connected" : "connecting…" }}
           </div>
+        </div>
+
+        <div v-else class="ap-table">
+          <table>
+            <thead>
+              <tr>
+                <th>SSID</th>
+                <th>BSSID</th>
+                <th>厂商</th>
+                <th>信道</th>
+                <th>信号</th>
+                <th>末次发现</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(a, i) in state.aps" :key="a.bssid || a.mac || i">
+                <td>{{ text(a.ssid, "(隐藏)") }}</td>
+                <td class="mono">{{ text(a.bssid || a.mac) }}</td>
+                <td>{{ text(a.vendor) }}</td>
+                <td>{{ text(a.ch) }}</td>
+                <td>{{ a.rssi == null ? "-" : `${a.rssi} dBm` }}</td>
+                <td>{{ text(a.last_seen || a.first_seen) }}</td>
+              </tr>
+              <tr v-if="!state.aps.length">
+                <td colspan="6" class="empty-log ap-table-empty">暂无 AP 数据（无网卡采集时为正常状态）。</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </section>
     </template>
@@ -245,5 +279,65 @@ function logCls(row: unknown): string {
 
 .empty-log {
   color: var(--muted);
+}
+
+.log-panel .panel-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+}
+
+.log-panel .panel-hdr h2 {
+  border-bottom: none;
+  gap: 4px;
+}
+
+.seg {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.seg.on {
+  color: var(--blue);
+  border-color: var(--blue);
+}
+
+.ap-table {
+  flex: 1;
+  overflow: auto;
+  max-height: 240px;
+}
+
+.ap-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.ap-table th {
+  position: sticky;
+  top: 0;
+  background: var(--card);
+  color: var(--muted);
+  text-align: left;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ap-table td {
+  padding: 4px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  white-space: nowrap;
+}
+
+.ap-table-empty {
+  text-align: center;
+  padding: 18px !important;
 }
 </style>

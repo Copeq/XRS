@@ -4,6 +4,7 @@ export interface DroneRow {
   sn: string;
   model?: string | null;
   uas_id?: string;
+  mac?: string;
   rssi?: number | null;
   pkts?: number;
   dir?: string;
@@ -22,6 +23,17 @@ export interface DroneRow {
   lon?: number | null;
 }
 
+export interface ApsRow {
+  bssid?: string;
+  mac?: string;
+  ssid?: string;
+  ch?: string | number;
+  rssi?: number | null;
+  vendor?: string;
+  first_seen?: string;
+  last_seen?: string;
+}
+
 export interface HomeState {
   connected: boolean;
   ts: string;
@@ -29,6 +41,7 @@ export interface HomeState {
   server_wall_ms: number;
   meta: Record<string, unknown>;
   drones: DroneRow[];
+  aps: ApsRow[];
   logs: unknown[];
 }
 
@@ -40,6 +53,7 @@ export function useLiveSocket() {
     server_wall_ms: 0,
     meta: {},
     drones: [],
+    aps: [],
     logs: [],
   });
 
@@ -64,6 +78,7 @@ export function useLiveSocket() {
       Object.assign(state.meta, m.meta);
     }
     if (Array.isArray(m.drones)) state.drones = m.drones as DroneRow[];
+    if (Array.isArray(m.aps)) state.aps = m.aps as ApsRow[];
     if (Array.isArray(m.logs) && m.logs.length > 0) {
       state.logs = state.logs.concat(m.logs).slice(-120);
     }

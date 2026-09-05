@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import type { DroneRow } from "../composables/useLiveSocket";
 import { pageFetch } from "../composables/pageApi";
+import TrackMap, { type TrackPoint } from "../components/TrackMap.vue";
 
 const props = defineProps<{ rows: DroneRow[] }>();
 
@@ -13,13 +14,30 @@ const selectedSn = ref<string>("");
 const detail = ref<DetailRow | null>(null);
 const detailBusy = ref(false);
 const detailError = ref("");
+const detailPoints = ref<TrackPoint[]>([]);
+
+const filterText = ref("");
+const scope = ref<"all" | "live" | "hist">("all");
+
+function matchesFilter(r: DroneRow): boolean {
+  const q = filterText.value.trim().toLowerCase();
+  if (!q) return true;
+  return [r.sn, r.model, r.uas_id, r.mac].some((v) => String(v ?? "").toLowerCase().includes(q));
+}
 
 const historyRows = computed(() =>
-  [...props.rows].sort((a, b) => {
-    const al = Number(a.archived ?? 0) - Number(b.archived ?? 0);
-    if (al !== 0) return al;
-    return (a.age ?? 0) - (b.age ?? 0);
-  }),
+  [...props.rows]
+    .filter((r) => {
+      if (scope.value === "live") return !r.archived;
+      if (scope.value === "hist") return !!r.archived;
+      return true;
+    })
+    .filter(matchesFilter)
+    .sort((a, b) => {
+      const al = Number(a.archived ?? 0) - Number(b.archived ?? 0);
+      if (al !== 0) return al;
+      return (a.age ?? 0) - (b.age ?? 0);
+    }),
 );
 
 function esc(v: unknown, fallback = "-"): string {
@@ -56,14 +74,36 @@ const detailFields: Array<[string, string]> = [
   ["operator_track_count", "飞手轨迹点数"],
 ];
 
+function parsePoints(list: unknown): TrackPoint[] {
+  const out: TrackPoint[] = [];
+  if (!Array.isArray(list)) return out;
+  for (const raw of list) {
+    const p = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+    if (!p) continue;
+    const lat = Number(p.lat ?? p.latitude);
+    const lon = Number(p.lon ?? p.lng ?? p.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lon) && lat !== 0 && lon !== 0) {
+      out.push({ lat, lon });
+    }
+  }
+  return out;
+}
+
 async function selectRow(sn: string) {
   selectedSn.value = sn;
   detailBusy.value = true;
   detailError.value = "";
+  detailPoints.value = [];
   try {
-    const d = (await pageFetch(`/api/drones/get?sn=${encodeURIComponent(sn)}`)) as Record<string, unknown>;
+    const d = (await pageFetch(
+      `/api/drones/get?sn=${encodeURIComponent(sn)}&include_tracks=1`,
+    )) as Record<string, unknown>;
     const item = d && typeof d.item === "object" ? (d.item as DetailRow) : {};
     detail.value = item;
+    const tracks = d.tracks && typeof d.tracks === "object"
+      ? ((d.tracks as Record<string, unknown>).aircraft ?? (d.tracks as Record<string, unknown>).operator)
+      : d.track;
+    detailPoints.value = parsePoints(Array.isArray(tracks) ? tracks : []);
   } catch (e) {
     detailError.value = e instanceof Error ? e.message : String(e);
     detail.value = null;
@@ -77,9 +117,19 @@ async function selectRow(sn: string) {
   <div class="history-view">
     <div class="history-grid">
       <section class="panel table-panel">
-        <h2>历史记录 · 全部飞机
-          <span class="count">{{ historyRows.length }}</span>
-        </h2>
+        <div class="panel-hdr">
+          <h2>历史记录
+            <span class="count">{{ historyRows.length }}</span>
+          </h2>
+          <div class="toolbar">
+            <div class="scope">
+              <button :class="{ on: scope === 'all' }" type="button" @click="scope = 'all'">全部</button>
+              <button :class="{ on: scope === 'live' }" type="button" @click="scope = 'live'">实时</button>
+              <button :class="{ on: scope === 'hist' }" type="button" @click="scope = 'hist'">历史</button>
+            </div>
+            <input v-model="filterText" class="filter" type="search" placeholder="搜索 SN / 机型 / UAS ID" />
+          </div>
+        </div>
         <div class="table-wrap">
           <table>
             <thead>
@@ -117,7 +167,7 @@ async function selectRow(sn: string) {
                 <td>{{ esc(r.last_seen) }}</td>
               </tr>
               <tr v-if="!historyRows.length">
-                <td colspan="9" class="empty-cell">暂无历史记录</td>
+                <td colspan="9" class="empty-cell">无匹配记录</td>
               </tr>
             </tbody>
           </table>
@@ -130,13 +180,16 @@ async function selectRow(sn: string) {
         </h2>
         <div v-if="detailBusy" class="detail-state">读取中…</div>
         <div v-else-if="detailError" class="detail-state err">{{ detailError }}</div>
-        <div v-else-if="detail" class="detail-grid">
-          <template v-for="[key, label] in detailFields" :key="key">
-            <span class="k">{{ label }}</span>
-            <span class="v">{{ esc(detail[key]) }}</span>
-          </template>
+        <div v-else-if="detail" class="detail-body">
+          <div class="detail-grid">
+            <template v-for="[key, label] in detailFields" :key="key">
+              <span class="k">{{ label }}</span>
+              <span class="v">{{ esc(detail[key]) }}</span>
+            </template>
+          </div>
+          <TrackMap :points="detailPoints" />
         </div>
-        <div v-else class="detail-state muted">选择左侧飞机查看详情（含轨迹点数）。</div>
+        <div v-else class="detail-state muted">选择左侧飞机查看详情与轨迹。</div>
       </section>
     </div>
   </div>
@@ -150,7 +203,7 @@ async function selectRow(sn: string) {
 
 .history-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
   gap: 12px;
   min-height: 300px;
 }
@@ -170,11 +223,19 @@ async function selectRow(sn: string) {
   flex-direction: column;
 }
 
-.panel h2 {
-  margin: 0;
+.panel .panel-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 8px 12px;
-  font-size: 13px;
   border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.panel-hdr h2 {
+  margin: 0;
+  font-size: 13px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -187,6 +248,43 @@ async function selectRow(sn: string) {
 .detail-sn {
   color: var(--muted);
   font-weight: 400;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scope {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.scope button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.scope button.on {
+  background: var(--blue);
+  color: #fff;
+}
+
+.filter {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--txt);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  min-width: 170px;
 }
 
 .table-wrap {
@@ -257,14 +355,21 @@ tbody tr.selected {
   padding: 20px !important;
 }
 
-.detail-panel .detail-grid {
+.detail-panel {
+  max-height: min(70vh, 680px);
+}
+
+.detail-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 10px;
+}
+
+.detail-grid {
   display: grid;
   grid-template-columns: max-content 1fr;
   gap: 6px 14px;
-  padding: 12px;
   font-size: 12px;
-  overflow: auto;
-  flex: 1;
 }
 
 .detail-grid .k {

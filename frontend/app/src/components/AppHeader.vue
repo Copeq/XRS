@@ -85,6 +85,67 @@ function openLegacy() {
   window.open("/?desktop=1", "_blank", "noopener,noreferrer");
 }
 
+/* 通知中心 */
+interface NotifyItem {
+  id?: number;
+  text?: string;
+  kind?: string;
+  source?: string;
+  ts?: number;
+}
+const notifyOpen = ref(false);
+const notifyItems = ref<NotifyItem[]>([]);
+const notifyBusy = ref(false);
+const notifyMsg = ref("");
+
+function notifyCount() {
+  return notifyItems.value.length;
+}
+async function loadNotifications() {
+  notifyBusy.value = true;
+  notifyMsg.value = "";
+  try {
+    const d = (await pageFetch("/api/notifications?limit=200")) as Record<string, unknown>;
+    const items = Array.isArray(d.items) ? (d.items as NotifyItem[]) : [];
+    notifyItems.value = items.slice(0, 100);
+  } catch (e) {
+    notifyMsg.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    notifyBusy.value = false;
+  }
+}
+async function toggleNotify() {
+  notifyOpen.value = !notifyOpen.value;
+  moreOpen.value = false;
+  if (notifyOpen.value) await loadNotifications();
+}
+async function deleteNotify(id: unknown) {
+  try {
+    await postJson("/api/notifications/delete", { id });
+    notifyItems.value = notifyItems.value.filter((x) => x.id !== id);
+  } catch (e) {
+    notifyMsg.value = e instanceof Error ? e.message : String(e);
+  }
+}
+async function clearNotify() {
+  try {
+    await postJson("/api/notifications/clear", {});
+    notifyItems.value = [];
+  } catch (e) {
+    notifyMsg.value = e instanceof Error ? e.message : String(e);
+  }
+}
+function notifyTime(ts: unknown): string {
+  if (typeof ts !== "number") return "-";
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "-";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function notifyKind(item: NotifyItem): string {
+  return String(item.kind ?? "info");
+}
+
 /* 模拟目标弹窗 */
 interface SimForm {
   count: number;
@@ -190,6 +251,31 @@ async function simStop() {
         <span class="chip"><b>离线</b> {{ lostCount }}</span>
         <span class="chip"><b>总计</b> {{ totalCount }}</span>
         <span class="chip mono">更新 {{ state.ts || "--:--:--" }}</span>
+
+        <div class="notify-wrap">
+          <button class="chip-btn" type="button" @click="toggleNotify">
+            通知{{ notifyCount() ? ` (${notifyCount()})` : "" }}
+          </button>
+          <div v-if="notifyOpen" class="notify-pop">
+            <div class="notify-head">
+              <strong>通知中心</strong>
+              <button class="mini" type="button" :disabled="notifyBusy" @click="loadNotifications">刷新</button>
+              <button class="mini" type="button" @click="clearNotify">清空</button>
+            </div>
+            <p v-if="notifyMsg" class="notify-msg">{{ notifyMsg }}</p>
+            <div class="notify-list">
+              <div v-if="!notifyItems.length && !notifyBusy" class="notify-empty">暂无通知</div>
+              <div v-for="item in notifyItems" :key="item.id" class="notify-item">
+                <div class="notify-line">
+                  <span class="ntag" :class="notifyKind(item)">{{ notifyKind(item) }}</span>
+                  <span class="ntime">{{ notifyTime(item.ts) }}</span>
+                  <button class="mini" type="button" @click="deleteNotify(item.id)">删</button>
+                </div>
+                <div class="ntext">{{ item.text }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div class="more-wrap">
           <button class="chip-btn" type="button" @click="toggleMore">更多</button>
@@ -367,6 +453,117 @@ async function simStop() {
 
 .more-pop button:hover {
   background: color-mix(in srgb, var(--blue) 12%, transparent);
+}
+
+.notify-wrap {
+  position: relative;
+}
+
+.notify-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  width: min(380px, calc(100vw - 24px));
+  z-index: 70;
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.16);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  max-height: min(520px, 70dvh);
+}
+
+.notify-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.notify-head strong {
+  margin-right: auto;
+}
+
+.mini {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--txt);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.notify-msg {
+  color: var(--warn, #d83b01);
+  font-size: 11px;
+  margin: 6px 0 0;
+}
+
+.notify-list {
+  overflow-y: auto;
+  flex: 1;
+  display: grid;
+  gap: 6px;
+  padding-top: 6px;
+}
+
+.notify-empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 14px;
+  font-size: 12px;
+}
+
+.notify-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.notify-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.ntag {
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 10px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.ntag.error {
+  color: #d1242f;
+  border-color: #d1242f;
+}
+
+.ntag.warn {
+  color: #b98900;
+  border-color: #d29922;
+}
+
+.ntag.ok {
+  color: #2ea043;
+  border-color: #2ea043;
+}
+
+.ntime {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ntext {
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .banner-stack {
