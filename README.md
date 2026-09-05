@@ -4,7 +4,6 @@
 
 XRS is a fixed-station Remote ID (ASTM F3411 / OpenDroneID) Wi-Fi monitor built for Raspberry Pi and other Linux-based capture nodes. It passively listens for drone Remote ID broadcasts over Wi-Fi, decodes them in real time, and presents the results through a local web dashboard.
 
-It also includes a portable edition for mobile deployments and a node-center viewer that aggregates multiple stations into a single pane of glass.
 
 - `station_edition/`
   Full fixed-station build. It contains the source runtime, web UI, security/auth controls, systemd/AP maintenance, and Raspberry Pi deployment defaults.
@@ -57,11 +56,6 @@ The station edition is meant to be usable from its own directory. Runtime files 
 - [Host Metrics](#host-metrics)
 - [Model Map Updates](#model-map-updates)
 - [Import & Export](#import--export)
-- [Node Center Viewer](#node-center-viewer)
-  - [Running the Viewer](#running-the-viewer)
-  - [Viewer Pages](#viewer-pages)
-  - [Viewer Module Layout](#viewer-module-layout)
-  - [Building the Viewer](#building-the-viewer)
 - [Important Files](#important-files)
 - [Git & Privacy Rules](#git--privacy-rules)
 - [OpenDroneID References](#opendroneid-references)
@@ -78,7 +72,6 @@ The repository contains three distinct editions, each serving a different deploy
 |---|---|
 | `station_edition/` | **Full fixed-station build.** Includes the scanner core, web server with embedded UI, authentication and session management, systemd service helpers, AP hotspot mode, and Raspberry Pi deployment defaults. This is the primary edition for permanent installations. |
 | `portable_edition/` | **Minimal mobile build.** Reuses the scanner and web core but disables web login, API tokens, SSO links, passkeys, host monitoring, and Enterprise WeCom notifications on startup. Designed for quick field deployments where authentication overhead is undesirable. |
-| `viewer/` | **Node-center aggregator.** A standalone web service that connects to multiple `station_edition` instances, fetches their live data via the external API, and renders a unified dashboard. |
 
 The root `run.py` is a thin compatibility wrapper that delegates directly to `station_edition/run.py`. Each edition is self-contained and can be run from its own directory.
 
@@ -114,18 +107,8 @@ XRS/
 ├── portable_edition/
 │   ├── pe.py                        # Portable entry point
 │   └── bootstrap.py                 # Startup overrides (disable auth/notify/etc.)
-├── viewer/
-│   ├── server.py                    # HTTP/API/WebSocket routing
-│   ├── storage.py                   # SQLite config, node records, auth state
-│   ├── aggregation.py               # Live station API fetching & aggregation
-│   ├── station_ui.py                # Station template loading & DOM patching
-│   ├── settings_ui.py               # Viewer settings page
-│   ├── nodes_ui.py                  # Node manager page
-│   ├── ui_common.py                 # Shared CSS extraction
-│   └── paths.py                     # Resource path resolution
 ├── pytools/
 │   ├── build_release.py             # CI/local release builder
-│   └── build_viewer.py              # Viewer binary builder
 ├── run.py                           # Root compatibility wrapper
 ├── rid_model.json                  # RID model prefix map
 ├── requirements.txt                 # Python dependencies
@@ -516,7 +499,6 @@ The Settings page generates these links after a fresh username/password verifica
 
 ## External API
 
-The external API provides machine-readable access to scanner data for integrations, scripts, and the Node Center Viewer.
 
 ### Enabling the API
 
@@ -810,77 +792,6 @@ These helpers are available from the Settings page and via direct API calls from
 
 ---
 
-## Node Center Viewer
-
-`viewer/server.py` is a standalone web service that aggregates multiple `station_edition` instances into a unified dashboard. It is designed for operators managing several fixed stations who want a single-pane-of-glass view.
-
-### Running the Viewer
-
-```bash
-python viewer/server.py --host 0.0.0.0 --port 4700
-```
-
-Open `http://<center-ip>:4700/`.
-
-### Data Flow
-
-The viewer stores only its own configuration in `viewer/cfg.db`:
-- Node API root URLs
-- Node API tokens
-- Optional viewer password and SSO login settings
-
-It does **not** store remote aircraft, base-station, AP, track, or health data. Every dashboard refresh fetches current data from each configured station API in parallel and renders the aggregate result. This means the viewer is stateless with respect to scan data — stop the viewer, and no scan data is retained.
-
-### Viewer Pages
-
-**`/` — Dashboard**
-- Reuses the Station page template from `station_edition/xrs/web_server.py`
-- Viewer code patches the data/API layer to fetch from remote stations instead of a local scanner
-- Station-only controls (scanner start/stop, channel change, etc.) are removed from the DOM
-
-**`/settings` — Viewer Settings**
-- Viewer host status (uptime, version)
-- Default map center position and zoom level
-- Password login configuration for the viewer itself
-- SSO check login configuration
-- EULA acceptance controls
-
-**`/nodes` — Node Manager**
-- Add, edit, test, and delete station nodes
-- Node info cards with live status
-- Load charts and scan count displays
-- One-click remote SSO URL creation for each node
-- Batch restart and batch model-database update across selected nodes
-
-### Adding a Node
-
-Enter only the API root URL, for example `http://192.168.1.10:4600`. Paths, query strings, fragments, and user-info are rejected — the viewer appends `/api/v1` paths itself and validates by making real API calls before saving.
-
-The viewer sends the configured token as both `X-API-Token` and `Authorization: Bearer <token>` headers.
-
-### Viewer Module Layout
-
-| Module | Responsibility |
-|---|---|
-| `viewer/server.py` | HTTP routing, API proxying, WebSocket |
-| `viewer/storage.py` | SQLite database for config, nodes, auth/session state |
-| `viewer/aggregation.py` | Parallel station API fetching and data aggregation |
-| `viewer/station_ui.py` | Station HTML template loading and viewer DOM patching |
-| `viewer/settings_ui.py` | Viewer-specific settings page (Station-styled) |
-| `viewer/nodes_ui.py` | Node manager page (Station-styled) |
-| `viewer/ui_common.py` | Shared CSS extraction from Station templates |
-| `viewer/paths.py` | Resource path resolution |
-
-### Building the Viewer
-
-```bash
-python pytools/build_viewer.py --target x86_64
-```
-
-CI builds viewer binaries through `.github/workflows/build-viewer.yml` for Linux `x86_64`, Linux `x32`, Linux `arm64`, Windows `windows-x86_64`, and Windows `windows-x32`.
-
----
-
 ## Important Files
 
 | File | Description | Commit? |
@@ -899,7 +810,6 @@ CI builds viewer binaries through `.github/workflows/build-viewer.yml` for Linux
 | `config.json.rollback` | Automatic rollback copy for recovery | **Never** |
 | `oui.txt` | MAC OUI vendor database (auto-downloaded) | **Never** |
 | `xrs_scanner/host_metrics.jsonl` | Host metrics samples (system temp dir) | **Never** |
-| `viewer/cfg.db` | Viewer node and auth configuration | **Never** |
 
 The build version shown in the UI follows the format `commit:<short-sha>#<build-number>`, read from `rid_build_info.json`. The current release line is `v2.0`, but the UI uses the commit-based label for traceability of local builds.
 

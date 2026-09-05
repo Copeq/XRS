@@ -748,77 +748,6 @@ https://raw.githubusercontent.com/Copeq/XRS/refs/heads/main/rid_model.json
 
 ---
 
-## 节点中心 Viewer
-
-`viewer/server.py` 是一个独立的 Web 服务，将多个 `station_edition` 基站实例聚合为统一仪表盘。适用于管理多台固定基站的运营者，提供一站式全局视图。
-
-### 运行 Viewer
-
-```bash
-python viewer/server.py --host 0.0.0.0 --port 4700
-```
-
-访问 `http://<中心节点IP>:4700/`。
-
-### 数据流向
-
-Viewer 仅在 `viewer/cfg.db` 中保存自身配置：
-- 节点 API 根地址
-- 节点 API Token
-- 可选的 Viewer 密码登录与 SSO 登录设置
-
-它**不会**落库存储远端飞机、基站、AP、轨迹或健康数据。每次仪表盘刷新时，Viewer 并行向各已配置基站 API 拉取当前数据并渲染聚合结果。这意味着 Viewer 对扫描数据是无状态的——停止 Viewer 后不会保留任何扫描数据。
-
-### Viewer 页面
-
-**`/` — 仪表盘**
-- 复用 `station_edition/xrs/web_server.py` 的 Station 页面模板
-- Viewer 代码通过补丁将数据/API 层替换为从远端基站获取
-- Station 专属控件（启停扫描器、信道切换等）已从 DOM 中移除
-
-**`/settings` — Viewer 设置**
-- Viewer 主机状态（运行时长、版本）
-- 默认地图中心位置与缩放级别
-- Viewer 自身的密码登录配置
-- SSO check 登录配置
-- EULA 许可协议控件
-
-**`/nodes` — 节点管理**
-- 添加、编辑、测试、删除基站节点
-- 节点信息卡片，实时状态展示
-- 负载图表与扫描数量统计
-- 为每个节点一键生成远端 SSO 登录 URL
-- 跨所选节点批量重启程序 / 更新识别库
-
-### 添加节点
-
-仅输入 API 根地址，例如 `http://192.168.1.10:4600`。路径、查询字符串、片段和用户信息会被拒绝——Viewer 自行拼接 `/api/v1` 路径，并在保存前通过真实 API 调用来验证连通性。
-
-Viewer 同时通过 `X-API-Token` 和 `Authorization: Bearer <token>` 头发送已配置的 Token。
-
-### Viewer 模块布局
-
-| 模块 | 职责 |
-|---|---|
-| `viewer/server.py` | HTTP 路由、API 代理、WebSocket |
-| `viewer/storage.py` | SQLite 数据库，保存配置、节点和鉴权/会话状态 |
-| `viewer/aggregation.py` | 并行基站 API 拉取与数据聚合 |
-| `viewer/station_ui.py` | Station HTML 模板加载与 Viewer DOM 补丁 |
-| `viewer/settings_ui.py` | Viewer 专属设置页（Station 风格） |
-| `viewer/nodes_ui.py` | 节点管理页（Station 风格） |
-| `viewer/ui_common.py` | 从 Station 模板提取共享 CSS |
-| `viewer/paths.py` | 资源路径解析 |
-
-### 构建 Viewer
-
-```bash
-python pytools/build_viewer.py --target x86_64
-```
-
-CI 通过 `.github/workflows/build-viewer.yml` 构建 Viewer 二进制，覆盖 Linux `x86_64`、Linux `x32`、Linux `arm64`、Windows `windows-x86_64` 和 Windows `windows-x32`。
-
----
-
 ## 关键文件说明
 
 | 文件 | 说明 | 可提交？ |
@@ -837,7 +766,6 @@ CI 通过 `.github/workflows/build-viewer.yml` 构建 Viewer 二进制，覆盖 
 | `config.json.rollback` | 自动回滚恢复副本 | **禁止** |
 | `oui.txt` | MAC OUI 厂商数据库（自动下载） | **禁止** |
 | `xrs_scanner/host_metrics.jsonl` | 主机负载采样数据（系统临时目录） | **禁止** |
-| `viewer/cfg.db` | Viewer 节点与鉴权配置 | **禁止** |
 
 UI 版本号格式为 `commit:<Git短提交号>#<构建号>`，从 `rid_build_info.json` 读取。当前发布版本线为 `v2.0`，但 UI 使用 commit 构建标签以确保本地构建的可追溯性。
 

@@ -20,7 +20,6 @@ Start from these rules:
 - Check the current worktree before editing. Do not assume a clean tree.
 - Continue in-progress work instead of rediscovering the repo from scratch when obvious local context exists.
 - Preserve existing UI structure unless the task explicitly calls for redesign.
-- Treat shared Station UI changes as potentially Viewer-affecting until verified otherwise.
 - Keep secrets, passwords, tokens, and private credentials out of tracked repo files.
 - Do not commit local notes, private operational records, credentials, tokens, or environment-specific files.
 
@@ -29,7 +28,6 @@ Start from these rules:
 High-level layout:
 
 - `station_edition/`: primary base-station product and runtime.
-- `viewer/`: standalone viewer / node-center service.
 - `frontend/`: local frontend build tooling; currently used for the shared home Vue bundle.
 - `portable_edition/`: intentionally WIP / limited scope in the current workflow.
 - `pytools/`: build helpers.
@@ -40,15 +38,12 @@ Key current architecture facts:
 
 - Root `run.py` is a compatibility wrapper.
 - Shared Station UI template lives in `station_edition/xrs/web_server.py`.
-- Viewer reuses Station UI structure through `viewer/station_ui.py` and shared CSS/script helpers in `viewer/ui_common.py`.
 - The shared home page has a Vue bridge bundle at `/assets/vue/rid-home.js`.
 
 ## Working Rules
 
 - Do not restart discovery if there is already in-progress work. Inspect current diffs and existing repo documentation first.
 - Preserve the existing UI structure unless the task explicitly asks for a redesign.
-- If changing the shared Station template, assume Viewer may inherit the change and verify both surfaces.
-- If changing Viewer-only behavior, keep the scope clear in the PR and avoid implying broader runtime impact without verification.
 - Prefer small, additive changes over wide rewrites when patching shared UI or parser logic.
 
 ## Current Workflow Notes
@@ -56,10 +51,8 @@ Key current architecture facts:
 Current repo workflow, summarized:
 
 - `station_edition/` is the main product runtime.
-- `viewer/` is a separate local-only viewer / node-center service unless explicitly included in deploy scope.
 - Root `run.py` is compatibility glue, not the primary implementation surface.
 - Shared Station UI template and much of the shared browser logic live in `station_edition/xrs/web_server.py`.
-- Viewer inherits shared UI structure through `viewer/station_ui.py` and `viewer/ui_common.py`.
 - The shared home page currently uses a Vue bundle at `station_edition/xrs/assets/vue/rid-home.js`, built from `frontend/`.
 
 ## Common Validation
@@ -70,7 +63,6 @@ Pick the smallest validation set that honestly covers the change. Typical comman
 
 ```bash
 python -m py_compile station_edition\xrs\web_server.py
-python -m py_compile viewer\server.py viewer\station_ui.py viewer\settings_ui.py viewer\nodes_ui.py viewer\ui_common.py
 ```
 
 ### Shared home frontend bundle
@@ -92,13 +84,10 @@ git diff --check
 
 Examples:
 
-- Viewer: `http://127.0.0.1:4700/`
-- Viewer settings: `http://127.0.0.1:4700/settings`
 - Station default runtime: usually `http://127.0.0.1:4600/` when running locally
 
 If changing browser behavior or shared UI:
 
-- Verify both Station and Viewer when the change is inherited.
 
 ## Deployment
 
@@ -111,7 +100,6 @@ If changing browser behavior or shared UI:
 A good PR for this repo should include:
 
 - What changed in product terms, not just file terms.
-- Whether the change is Station-only, Viewer-only, or shared.
 - Any behavior inherited through `station_edition/xrs/web_server.py`.
 - Validation commands actually run.
 - Whether deployment was performed, at a high level if relevant.
@@ -144,8 +132,6 @@ Minimum handoff content:
 
 ## UI-Specific Reminders
 
-- Shared Station template changes often affect Viewer automatically.
-- Shared settings styling is extracted by `viewer/ui_common.py` from the Station settings page.
 - The current iCloud-style restyle is broad and CSS-heavy in `station_edition/xrs/web_server.py`; inspect there first if visual regressions appear.
 - The Station network binding editor now lives inline as `#network-bind-module` inside the settings capture card and is default-collapsed.
 
@@ -153,5 +139,4 @@ Minimum handoff content:
 
 - Check for existing uncommitted work before editing.
 - Keep README and README.zh-CN aligned when changing user-facing docs.
-- Do not assume Viewer should be deployed with Station changes.
 - Keep deployment discussion high level in public repo artifacts.
