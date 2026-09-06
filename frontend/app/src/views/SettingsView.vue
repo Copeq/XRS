@@ -41,10 +41,27 @@ interface FormState {
   map_tile_attribution: string;
   map_tile_max_native_zoom: number;
   heading_ref_deg: number;
+  dji_lookup_url: string;
   fixed_channel: boolean;
   channel: number;
   lost_timeout: number;
   min_gap: number;
+  /* 扫描高级 */
+  hop: boolean;
+  hop_5g: boolean;
+  scan_wifi_fast: boolean;
+  auto_self_heal: boolean;
+  change_on_rssi: boolean;
+  change_on_payload: boolean;
+  debug: boolean;
+  dwell_2g: number;
+  dwell_5g: number;
+  settle: number;
+  dwell_on_hit: number;
+  hit_cap: number;
+  rssi_delta: number;
+  time: number;
+  track_points_limit: number;
   /* Web 访问控制 */
   access_enabled: boolean;
   access_mode: string;
@@ -57,6 +74,26 @@ interface FormState {
   reonline_cooldown_sec: number;
   send_timeout_sec: number;
   hooks: HookForm[];
+  /* Token API */
+  api_enabled: boolean;
+  api_whitelist_enabled: boolean;
+  api_whitelist_mode: string;
+  api_whitelist: string[];
+  /* 鉴权 */
+  auth_enabled: boolean;
+  auth_realm: string;
+  auth_ttl: number;
+  login_password: boolean;
+  login_passkey: boolean;
+  auth_username: string;
+  auth_password: string;
+  /* 机型库更新 */
+  model_enabled: boolean;
+  model_url: string;
+  /* 主机指标 */
+  metrics_enabled: boolean;
+  metrics_retention: number;
+  metrics_temp: string;
 }
 
 const loading = ref(true);
@@ -82,6 +119,22 @@ const form = reactive<FormState>({
   channel: 6,
   lost_timeout: 15,
   min_gap: 0.5,
+  dji_lookup_url: "",
+  hop: false,
+  hop_5g: false,
+  scan_wifi_fast: false,
+  auto_self_heal: true,
+  change_on_rssi: false,
+  change_on_payload: false,
+  debug: false,
+  dwell_2g: 300,
+  dwell_5g: 300,
+  settle: 50,
+  dwell_on_hit: 2500,
+  hit_cap: 6000,
+  rssi_delta: 3,
+  time: 1,
+  track_points_limit: 10000,
   access_enabled: false,
   access_mode: "allow",
   access_list: [] as string[],
@@ -91,6 +144,22 @@ const form = reactive<FormState>({
   reonline_cooldown_sec: 300,
   send_timeout_sec: 8,
   hooks: [] as HookForm[],
+  api_enabled: false,
+  api_whitelist_enabled: false,
+  api_whitelist_mode: "allow",
+  api_whitelist: [] as string[],
+  auth_enabled: false,
+  auth_realm: "XRS",
+  auth_ttl: 30,
+  login_password: true,
+  login_passkey: true,
+  auth_username: "",
+  auth_password: "",
+  model_enabled: true,
+  model_url: "",
+  metrics_enabled: false,
+  metrics_retention: 7,
+  metrics_temp: "auto",
 });
 
 function text(v: unknown, fallback = ""): string {
@@ -124,6 +193,22 @@ function applyVisual(visual: Dict) {
   form.channel = num(b.channel ?? 6, 6);
   form.lost_timeout = num(b.lost_timeout ?? 15, 15);
   form.min_gap = num(b.min_gap ?? 0.5, 0.5);
+  form.dji_lookup_url = text(w.dji_lookup_url ?? (visual as Dict).dji_lookup_url, "");
+  form.hop = !!b.hop;
+  form.hop_5g = !!b.hop_5g;
+  form.scan_wifi_fast = !!b.scan_wifi_fast;
+  form.auto_self_heal = b.auto_self_heal !== false;
+  form.change_on_rssi = !!b.change_on_rssi;
+  form.change_on_payload = !!b.change_on_payload;
+  form.debug = !!b.debug;
+  form.dwell_2g = num(b.dwell_2g ?? 300, 300);
+  form.dwell_5g = num(b.dwell_5g ?? 300, 300);
+  form.settle = num(b.settle ?? 50, 50);
+  form.dwell_on_hit = num(b.dwell_on_hit ?? 2500, 2500);
+  form.hit_cap = num(b.hit_cap ?? 6000, 6000);
+  form.rssi_delta = num(b.rssi_delta ?? 3, 3);
+  form.time = num(b.time ?? 1, 1);
+  form.track_points_limit = num(b.track_points_limit ?? 10000, 10000);
   /* Web 访问控制 */
   form.access_enabled = !!w.access_list_enabled;
   form.access_mode = text(w.access_list_mode, "allow");
@@ -151,6 +236,31 @@ function applyVisual(visual: Dict) {
     enabled: h.enabled !== false,
     key: "",
   }));
+  /* Token API */
+  const ap = (visual.api ?? {}) as Dict;
+  form.api_enabled = !!ap.enabled;
+  form.api_whitelist_enabled = !!ap.whitelist_enabled;
+  form.api_whitelist_mode = text(ap.whitelist_mode, "allow");
+  form.api_whitelist = Array.isArray(ap.whitelist) ? (ap.whitelist as Array<unknown>).map((x) => text(x, "").trim()).filter(Boolean) : [];
+  /* 鉴权 */
+  const at = (visual.auth ?? {}) as Dict;
+  form.auth_enabled = !!at.enabled;
+  form.auth_realm = text(at.realm, "XRS");
+  form.auth_ttl = num(at.session_ttl_min ?? 30, 30);
+  const methods = Array.isArray(at.login_methods) ? (at.login_methods as Array<unknown>).map((x) => String(x)) : [];
+  form.login_password = methods.includes("password");
+  form.login_passkey = methods.includes("passkey");
+  form.auth_username = "";
+  form.auth_password = "";
+  /* 机型库更新 */
+  const mu = (visual.model_update ?? {}) as Dict;
+  form.model_enabled = mu.enabled !== false;
+  form.model_url = text(mu.url, "");
+  /* 主机指标 */
+  const mc = (visual.metrics ?? {}) as Dict;
+  form.metrics_enabled = !!mc.enabled;
+  form.metrics_retention = num(mc.retention_days ?? 7, 7);
+  form.metrics_temp = text(mc.temperature_source, "auto");
 }
 
 async function load() {
@@ -195,6 +305,12 @@ async function load() {
   }
 }
 
+function addApiEntry() {
+  form.api_whitelist.push("");
+}
+function removeApiEntry(i: number) {
+  form.api_whitelist.splice(i, 1);
+}
 function addZone() {
   form.alarm_zones.push({ enabled: false, name: "", lat1: "", lon1: "", lat2: "", lon2: "" });
 }
@@ -223,10 +339,22 @@ async function save() {
     else basic.channel = null;
     basic.lost_timeout = num(form.lost_timeout, 15);
     basic.min_gap = num(form.min_gap, 0.5);
+    for (const k of ["hop", "hop_5g", "scan_wifi_fast", "auto_self_heal", "change_on_rssi", "change_on_payload", "debug"]) {
+      basic[k] = !!form[k as keyof FormState];
+    }
+    basic.dwell_2g = num(form.dwell_2g, 300);
+    basic.dwell_5g = num(form.dwell_5g, 300);
+    basic.settle = num(form.settle, 50);
+    basic.dwell_on_hit = num(form.dwell_on_hit, 2500);
+    basic.hit_cap = num(form.hit_cap, 6000);
+    basic.rssi_delta = num(form.rssi_delta, 3);
+    basic.time = num(form.time, 1);
+    basic.track_points_limit = num(form.track_points_limit, 10000);
     const web: Dict = {
       base_name: text(form.base_name, "基站"),
       base_zoom: num(form.base_zoom, 13),
       heading_ref_deg: num(form.heading_ref_deg, 0),
+      dji_lookup_url: text(form.dji_lookup_url, ""),
       map_tile_url: text(form.map_tile_url, ""),
       map_tile_subdomains: text(form.map_tile_subdomains, ""),
       map_tile_attribution: text(form.map_tile_attribution, ""),
@@ -267,7 +395,43 @@ async function save() {
         key: h.key.trim(),
       })),
     };
-    const d = (await postJson("/api/settings/visual/save", { basic, web, notify: notifyPayload })) as Dict;
+    const apiPayload: Dict = {
+      enabled: form.api_enabled,
+      whitelist_enabled: form.api_whitelist_enabled,
+      whitelist_mode: form.api_whitelist_mode,
+      whitelist: [...form.api_whitelist].map((x) => x.trim()).filter(Boolean),
+    };
+    const loginMethods: string[] = [];
+    if (form.login_password) loginMethods.push("password");
+    if (form.login_passkey) loginMethods.push("passkey");
+    const usernameRaw = text(form.auth_username, "").trim();
+    const passwordRaw = form.auth_password;
+    const authPayload: Dict = {
+      enabled: form.auth_enabled,
+      realm: text(form.auth_realm, "XRS"),
+      session_ttl_min: num(form.auth_ttl, 30),
+      login_methods: loginMethods.length ? loginMethods : ["password"],
+    };
+    if (usernameRaw) authPayload.username = usernameRaw;
+    if (passwordRaw) authPayload.password = passwordRaw;
+    const metricsPayload: Dict = {
+      enabled: form.metrics_enabled,
+      retention_days: num(form.metrics_retention, 7),
+      temperature_source: text(form.metrics_temp, "auto"),
+    };
+    const modelPayload: Dict = {
+      enabled: form.model_enabled,
+      url: text(form.model_url, ""),
+    };
+    const d = (await postJson("/api/settings/visual/save", {
+      basic,
+      web,
+      notify: notifyPayload,
+      api: apiPayload,
+      auth: authPayload,
+      metrics: metricsPayload,
+      model_update: modelPayload,
+    })) as Dict;
     if (d.ok === false) {
       notify(text(d.error, "保存失败"), true);
       return;
@@ -365,6 +529,92 @@ onMounted(() => {
             <VTextField v-model="form.map_tile_subdomains" label="子域名(逗号分隔)" density="compact" variant="outlined" hide-details />
             <VTextField v-model="form.map_tile_attribution" label="版权署名" density="compact" variant="outlined" hide-details />
             <VTextField v-model.number="form.map_tile_max_native_zoom" label="原生最大缩放" type="number" min="1" max="30" density="compact" variant="outlined" hide-details />
+          </div>
+          <div class="mt-3">
+            <VTextField v-model="form.dji_lookup_url" label="DJI 查询 URL" density="compact" variant="outlined" hide-details />
+          </div>
+        </section>
+
+        <!-- 采集高级 -->
+        <section class="st-card">
+          <h2>采集高级</h2>
+          <div class="sw-grid mb-2">
+            <VSwitch v-model="form.hop" label="信道跳频" color="primary" hide-details />
+            <VSwitch v-model="form.hop_5g" label="跳频含 5G" color="primary" hide-details />
+            <VSwitch v-model="form.scan_wifi_fast" label="WiFi 快速扫描" color="primary" hide-details />
+            <VSwitch v-model="form.auto_self_heal" label="自动自愈" color="primary" hide-details />
+            <VSwitch v-model="form.change_on_rssi" label="RSSI 变化更新" color="primary" hide-details />
+            <VSwitch v-model="form.change_on_payload" label="载荷变化更新" color="primary" hide-details />
+            <VSwitch v-model="form.debug" label="调试输出" color="primary" hide-details />
+          </div>
+          <div class="num-grid">
+            <VTextField v-model.number="form.dwell_2g" label="2.4G 停留(ms)" type="number" min="1" density="compact" variant="outlined" hide-details />
+            <VTextField v-model.number="form.dwell_5g" label="5G 停留(ms)" type="number" min="1" density="compact" variant="outlined" hide-details />
+            <VTextField v-model.number="form.settle" label="跳频稳定(ms)" type="number" min="0" density="compact" variant="outlined" hide-details />
+            <VTextField v-model.number="form.dwell_on_hit" label="命中停留(ms)" type="number" min="0" density="compact" variant="outlined" hide-details />
+            <VTextField v-model.number="form.hit_cap" label="命中上限(ms)" type="number" min="0" density="compact" variant="outlined" hide-details />
+            <VTextField v-model.number="form.rssi_delta" label="RSSI 变化阈值" type="number" min="1" density="compact" variant="outlined" hide-details />
+            <VTextField v-model.number="form.time" label="输出周期(s)" type="number" min="0" step="0.1" density="compact" variant="outlined" hide-details />
+            <VTextField v-model.number="form.track_points_limit" label="轨迹点数上限" type="number" min="10" density="compact" variant="outlined" hide-details />
+          </div>
+        </section>
+
+        <!-- Token API -->
+        <section class="st-card">
+          <h2>Token API</h2>
+          <VSwitch v-model="form.api_enabled" label="启用 Token API" color="primary" hide-details class="mb-3" />
+          <VSwitch v-model="form.api_whitelist_enabled" label="启用访问名单" color="primary" hide-details class="mb-2" />
+          <VSelect
+            v-model="form.api_whitelist_mode"
+            label="名单模式"
+            :items="[{ title: '允许名单', value: 'allow' }, { title: '拒绝名单', value: 'deny' }]"
+            :disabled="!form.api_whitelist_enabled"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="mb-2"
+          />
+          <div v-for="(addr, i) in form.api_whitelist" :key="i" class="d-flex ga-2 mb-2">
+            <VTextField v-model="form.api_whitelist[i]" label="IP / CIDR" density="compact" variant="outlined" hide-details class="flex-grow-1" />
+            <VBtn icon="mdi-delete-outline" size="small" variant="text" @click="removeApiEntry(i)" />
+          </div>
+          <VBtn size="small" variant="outlined" color="primary" @click="addApiEntry">添加地址</VBtn>
+        </section>
+
+        <!-- 鉴权 -->
+        <section class="st-card">
+          <h2>网页鉴权</h2>
+          <VSwitch v-model="form.auth_enabled" label="启用网页登录" color="primary" hide-details class="mb-3" />
+          <div class="d-flex ga-2 mb-3">
+            <VTextField v-model="form.auth_username" label="用户名（留空保持不变）" density="compact" variant="outlined" hide-details />
+            <VTextField v-model="form.auth_password" label="密码（留空保持不变）" type="password" density="compact" variant="outlined" hide-details />
+          </div>
+          <div class="d-flex ga-2 mb-3">
+            <VTextField v-model="form.auth_realm" label="Realm" density="compact" variant="outlined" hide-details />
+            <VTextField v-model.number="form.auth_ttl" label="会话时长(分)" type="number" min="1" max="10080" density="compact" variant="outlined" hide-details />
+          </div>
+          <div class="sw-grid">
+            <VSwitch v-model="form.login_password" label="允许密码登录" color="primary" hide-details />
+            <VSwitch v-model="form.login_passkey" label="允许通行密钥" color="primary" hide-details />
+          </div>
+        </section>
+
+        <!-- 机型库与主机指标 -->
+        <section class="st-card">
+          <h2>机型库与主机指标</h2>
+          <VSwitch v-model="form.model_enabled" label="启用机型库在线更新" color="primary" hide-details class="mb-2" />
+          <VTextField v-model="form.model_url" label="机型库 URL（留空用默认仓库地址）" density="compact" variant="outlined" hide-details class="mb-4" />
+          <VSwitch v-model="form.metrics_enabled" label="采集主机负载指标" color="primary" hide-details class="mb-2" />
+          <div class="d-flex ga-2">
+            <VTextField v-model.number="form.metrics_retention" label="指标保留(天)" type="number" min="1" max="90" density="compact" variant="outlined" hide-details />
+            <VSelect
+              v-model="form.metrics_temp"
+              label="温度来源"
+              :items="[{ title: '自动', value: 'auto' }, { title: 'CPU', value: 'cpu' }, { title: '主板', value: 'board' }, { title: '关闭', value: 'off' }]"
+              density="compact"
+              variant="outlined"
+              hide-details
+            />
           </div>
         </section>
 
@@ -503,6 +753,18 @@ onMounted(() => {
 
 .mono {
   font-family: var(--mono);
+}
+
+.sw-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 2px 14px;
+}
+
+.num-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
 }
 
 .zone-grid {
