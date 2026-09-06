@@ -43,6 +43,7 @@ interface FormState {
   map_tile_attribution: string;
   map_tile_max_native_zoom: number;
   heading_ref_deg: number;
+  map_idle: number;
   dji_lookup_url: string;
   fixed_channel: boolean;
   channel: number;
@@ -134,6 +135,7 @@ const form = reactive<FormState>({
   map_tile_attribution: "",
   map_tile_max_native_zoom: 18,
   heading_ref_deg: 0,
+  map_idle: 60,
   fixed_channel: false,
   channel: 6,
   lost_timeout: 15,
@@ -208,6 +210,7 @@ function applyVisual(visual: Dict) {
   form.map_tile_attribution = text(w.map_tile_attribution, "");
   form.map_tile_max_native_zoom = num(w.map_tile_max_native_zoom ?? 18, 18);
   form.heading_ref_deg = num(w.heading_ref_deg ?? 0, 0);
+  form.map_idle = num(w.map_auto_center_idle_sec ?? 60, 60);
   form.fixed_channel = !(b.channel == null || b.channel === "");
   form.channel = num(b.channel ?? 6, 6);
   form.lost_timeout = num(b.lost_timeout ?? 15, 15);
@@ -323,6 +326,16 @@ async function load() {
     applyVisual((view as Dict).visual as Dict);
     initNetworkBindings(((bind as Dict).bindings as Dict) ?? {}, ifaces);
     lastPayloadJson.value = JSON.stringify(buildVisualPayload());
+    applyEula(((view as Dict).eula as Dict) ?? {});
+    try {
+      const ls = localStorage.getItem("rid_new_firmware_parse_enabled");
+      newFwParse.value = ls == null ? true : ls !== "0";
+    } catch (_e) {
+      newFwParse.value = true;
+    }
+    loadSystemServiceStatus().catch(() => {
+      /* ignore */
+    });
     await loadRawTree();
     await loadMetrics();
     await loadRuntime();
@@ -478,6 +491,7 @@ function buildVisualPayload(): Dict {
     map_tile_attribution: text(form.map_tile_attribution, ""),
     map_tile_max_native_zoom: num(form.map_tile_max_native_zoom, 18),
   };
+  if (form.map_idle >= 5) web.map_auto_center_idle_sec = Math.min(600, Math.floor(form.map_idle));
   const latS = text(form.base_lat, "").trim();
   const lonS = text(form.base_lon, "").trim();
   if (latS || lonS) {
@@ -946,6 +960,83 @@ async function importFile(kind: "settings" | "scan", ev: Event) {
   }
 }
 
+/* ------- EULA / 系统服务 / 浏览器偏好 ------- */
+const eulaAccepted = ref(false);
+const eulaSetPath = ref("EULA.set");
+const eulaSource = ref("");
+const serviceStatus = ref<Dict>({});
+const serviceMsg = ref("");
+const newFwParse = ref(true);
+
+function applyEula(e: Dict) {
+  eulaAccepted.value = !!e.accepted;
+  eulaSetPath.value = text(e.set_path, "EULA.set");
+  eulaSource.value = text(e.source_url, "");
+}
+
+async function revokeEula() {
+  if (!window.confirm("撤回后会立刻回到许可协议确认页。确定继续吗？")) return;
+  try {
+    const d = (await postJson("/api/eula/revoke", {})) as Dict;
+    notify("已撤回 EULA 同意状态", false);
+    applyEula(d);
+    window.setTimeout(() => {
+      window.location.href = "/eula?next=/settings";
+    }, 700);
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  }
+}
+
+async function loadSystemServiceStatus() {
+  try {
+    const d = (await pageFetch("/api/settings/systemd/status")) as Dict;
+    serviceStatus.value = d ?? {};
+    const iw = (d.iw ?? {}) as Dict;
+    const lines: string[] = [];
+    if (d.supported) {
+      if (d.registered) {
+        lines.push(d.running_as_root ? "systemd 已注册；当前运行权限过高，建议修复。" : d.service_uses_dedicated_user && d.dedicated_user_exists ? "systemd 服务已注册，专用账号运行正常。" : "systemd 已注册，但未使用 rid 专用账号。");
+      } else {
+        lines.push("systemd 尚未注册服务。");
+      }
+      if (d.registered && d.unit_matches === false) lines.push("当前服务文件与页面生成参数不一致，可点「注册/更新服务」修正。");
+    } else {
+      lines.push(`systemd 不可用${text(d.reason, "") ? `，${text(d.reason, "")}` : ""}`);
+      if (text(d.manual_hint, "")) lines.push(text(d.manual_hint, ""));
+    }
+    const wirelessToolsMissing = !(iw.available && iw.hostapd_available);
+    if (iw.message && wirelessToolsMissing) lines.push(text(iw.message, ""));
+    if (iw.manual_hint && wirelessToolsMissing) lines.push(text(iw.manual_hint, ""));
+    if (text(d.last_error, "")) lines.push(`状态读取失败：${text(d.last_error, "")}`);
+    serviceMsg.value = lines.join("\n") || "运行状态正常。";
+  } catch (e) {
+    serviceMsg.value = `服务状态读取失败：${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+async function refreshServiceStatus() {
+  toolBusy.value = "svc-refresh";
+  try {
+    await loadSystemServiceStatus();
+  } finally {
+    toolBusy.value = "";
+  }
+}
+
+function viewEula() {
+  window.open("/eula?next=/settings", "_blank", "noopener,noreferrer");
+}
+
+function saveNewFwParse() {
+  try {
+    localStorage.setItem("rid_new_firmware_parse_enabled", newFwParse.value ? "1" : "0");
+  } catch (_e) {
+    /* ignore */
+  }
+  notify("页面偏好已保存到当前浏览器", false);
+}
+
 /* ------- 维护工具 ------- */
 async function maintenance(op: "reidentify" | "systemd" | "iw" | "security" | "models") {
   if (op === "reidentify") {
@@ -1302,6 +1393,7 @@ onMounted(() => {
             <VTextField v-model="form.base_lon" label="基站经度" type="number" step="any" density="compact" variant="outlined" hide-details />
             <VTextField v-model.number="form.base_zoom" label="初始缩放" type="number" min="3" max="30" density="compact" variant="outlined" hide-details />
             <VTextField v-model.number="form.heading_ref_deg" label="机头参考°" type="number" step="any" density="compact" variant="outlined" hide-details />
+            <VTextField v-model.number="form.map_idle" label="自动回中冷却(s)" type="number" min="5" max="600" density="compact" variant="outlined" hide-details />
           </div>
           <div class="mb-3">
             <VTextField v-model="form.map_tile_url" label="地图瓦片模板 URL（需含 {z}/{x}/{y}）" density="compact" variant="outlined" hide-details />
@@ -1502,6 +1594,48 @@ onMounted(() => {
           <div class="muted-note mt-1">需要 HTTPS 或 localhost 安全上下文，并配合浏览器/系统认证器弹窗完成登记。</div>
         </section>
 
+        <!-- 许可协议 -->
+        <section class="st-card">
+          <h2>许可协议</h2>
+          <VChip variant="tonal" label :color="eulaAccepted ? 'success' : 'warning'" class="mb-2">
+            {{ eulaAccepted ? "已同意许可协议" : "还没有同意许可协议" }}
+          </VChip>
+          <div class="muted-note mb-3">
+            <div>状态文件 {{ eulaSetPath }}</div>
+            <div v-if="eulaSource">协议来源 {{ eulaSource }}</div>
+          </div>
+          <div class="d-flex ga-2">
+            <VBtn size="small" variant="outlined" @click="viewEula">查看 EULA</VBtn>
+            <VBtn size="small" color="warning" variant="tonal" :disabled="!eulaAccepted" @click="revokeEula">撤回同意</VBtn>
+          </div>
+        </section>
+
+        <!-- 系统服务 -->
+        <section class="st-card">
+          <h2>systemd 服务状态</h2>
+          <div class="d-flex flex-wrap ga-2 mb-2">
+            <VChip variant="tonal" label :color="serviceStatus.supported ? 'success' : 'default'">systemd {{ serviceStatus.supported ? "可用" : "不可用" }}</VChip>
+            <VChip variant="tonal" label :color="serviceStatus.registered ? 'success' : 'default'">{{ serviceStatus.registered ? "已注册" : "未注册" }}</VChip>
+            <VChip variant="tonal" label :color="!serviceStatus.running_as_root && serviceStatus.service_uses_dedicated_user ? 'success' : 'warning'">
+              {{ serviceStatus.running_as_root ? "运行权限过高" : serviceStatus.service_uses_dedicated_user && serviceStatus.dedicated_user_exists ? "专用账号运行" : "未使用专用账号" }}
+            </VChip>
+          </div>
+          <pre v-if="serviceMsg" class="log-box mb-2">{{ serviceMsg }}</pre>
+          <div class="d-flex flex-wrap ga-2">
+            <VBtn size="small" variant="tonal" :loading="toolBusy === 'svc-refresh'" @click="refreshServiceStatus">刷新服务状态</VBtn>
+            <VBtn size="small" variant="outlined" :loading="toolBusy === 'systemd'" @click="maintenance('systemd')">注册/更新服务</VBtn>
+            <VBtn size="small" variant="tonal" :loading="toolBusy === 'iw'" @click="maintenance('iw')">安装无线工具</VBtn>
+            <VBtn size="small" color="warning" variant="tonal" :loading="toolBusy === 'security'" @click="maintenance('security')">修复运行权限</VBtn>
+          </div>
+        </section>
+
+        <!-- 浏览器偏好 -->
+        <section class="st-card">
+          <h2>浏览器偏好</h2>
+          <VSwitch v-model="newFwParse" label="显示 RID 包解析结果" color="primary" hide-details class="mb-2" @change="saveNewFwParse" />
+          <div class="muted-note">仅影响当前浏览器显示。</div>
+        </section>
+
         <!-- 机型库与主机指标 -->
         <section class="st-card">
           <h2>机型库与主机指标</h2>
@@ -1513,7 +1647,15 @@ onMounted(() => {
             <VSelect
               v-model="form.metrics_temp"
               label="温度来源"
-              :items="[{ title: '自动', value: 'auto' }, { title: 'CPU', value: 'cpu' }, { title: '主板', value: 'board' }, { title: '关闭', value: 'off' }]"
+              :items="[
+                { title: '自动', value: 'auto' },
+                { title: '仅 vcgencmd', value: 'vcgencmd' },
+                { title: '仅 vcgencmd PMIC', value: 'vcgencmd_pmic' },
+                { title: '仅 /sys/class/thermal', value: 'thermal_zone' },
+                { title: '仅 /sys/class/hwmon', value: 'hwmon' },
+                { title: '仅 DS18B20 / w1', value: 'w1' },
+                { title: '关闭温度采集', value: 'off' },
+              ]"
               density="compact"
               variant="outlined"
               hide-details
