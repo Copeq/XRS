@@ -6,7 +6,7 @@ import { useUiTheme } from "../composables/useUiTheme";
 import AppHeader from "../components/AppHeader.vue";
 import LiveMap from "../components/LiveMap.vue";
 import HardwareAssistant from "../components/HardwareAssistant.vue";
-import SettingsView from "../components/SettingsView.vue";
+import SettingsView from "./SettingsView.vue";
 import HistoryView from "./HistoryView.vue";
 
 type PageKey = "live" | "history" | "hardware" | "settings";
