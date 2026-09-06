@@ -355,34 +355,36 @@ async function simStop() {
     </VTabs>
 
     <!-- 模拟目标弹窗 -->
-    <div v-if="simOpen" class="modal-mask" @click.self="simOpen = false">
-      <div class="modal">
-        <div class="modal-head">
-          <strong>模拟目标</strong>
-          <span class="muted">仅驻留内存，不写入历史记录</span>
-          <button class="banner-close" type="button" @click="simOpen = false">×</button>
-        </div>
-        <div class="modal-body">
-          <label>数量 <input v-model.number="sim.count" type="number" min="1" max="100" /></label>
-          <label>轨迹 <select v-model="sim.pattern">
-            <option value="circle">圆形</option>
-            <option value="line">直线</option>
-            <option value="stationary">悬停</option>
-          </select></label>
-          <label>半径(m) <input v-model.number="sim.radius_m" type="number" /></label>
-          <label>速度(m/s) <input v-model.number="sim.speed_mps" type="number" /></label>
-          <label>高度(m) <input v-model.number="sim.altitude_m" type="number" /></label>
-          <label>时长(s) <input v-model.number="sim.duration_sec" type="number" /></label>
-        </div>
-        <p class="sim-status" :class="{ running: simRunning }">
-          {{ simMsg || (simRunning ? "运行中" : "空闲") }}
-        </p>
-        <div class="modal-foot">
-          <button type="button" class="btn primary" :disabled="simBusy" @click="simStart">启动</button>
-          <button type="button" class="btn" :disabled="simBusy || !simRunning" @click="simStop">停止</button>
+    <Teleport to="body">
+      <div v-if="simOpen" class="modal-mask" @click.self="simOpen = false">
+        <div class="modal">
+          <div class="modal-head">
+            <strong>模拟目标</strong>
+            <span class="muted">仅驻留内存，不写入历史记录</span>
+            <button class="banner-close" type="button" @click="simOpen = false">×</button>
+          </div>
+          <div class="modal-body">
+            <label>数量 <input v-model.number="sim.count" type="number" min="1" max="100" /></label>
+            <label>轨迹 <select v-model="sim.pattern">
+              <option value="circle">圆形</option>
+              <option value="line">直线</option>
+              <option value="stationary">悬停</option>
+            </select></label>
+            <label>半径(m) <input v-model.number="sim.radius_m" type="number" /></label>
+            <label>速度(m/s) <input v-model.number="sim.speed_mps" type="number" /></label>
+            <label>高度(m) <input v-model.number="sim.altitude_m" type="number" /></label>
+            <label>时长(s) <input v-model.number="sim.duration_sec" type="number" /></label>
+          </div>
+          <p class="sim-status" :class="{ running: simRunning }">
+            {{ simMsg || (simRunning ? "运行中" : "空闲") }}
+          </p>
+          <div class="modal-foot">
+            <button type="button" class="btn primary" :disabled="simBusy" @click="simStart">启动</button>
+            <button type="button" class="btn" :disabled="simBusy || !simRunning" @click="simStop">停止</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
 
     <!-- 外观背景设置（Vuetify） -->
     <VDialog v-model="themeOpen" max-width="560">
@@ -761,8 +763,8 @@ async function simStop() {
 .modal-mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 2000;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 10000;
   display: grid;
   place-items: center;
 }
