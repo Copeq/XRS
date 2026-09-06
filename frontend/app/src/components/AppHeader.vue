@@ -1,11 +1,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
+  VBadge,
   VBtn,
   VCard,
   VCardActions,
   VCardText,
+  VChip,
   VDialog,
+  VIcon,
+  VList,
+  VListItem,
+  VListItemTitle,
+  VMenu,
   VSlider,
   VSpacer,
   VSwitch,
@@ -74,9 +81,6 @@ function openDji() {
 
 /* 更多菜单 */
 const moreOpen = ref(false);
-function toggleMore() {
-  moreOpen.value = !moreOpen.value;
-}
 function navTo(href: string) {
   moreOpen.value = false;
   window.location.href = href;
@@ -85,11 +89,6 @@ function navTo(href: string) {
 function goHardware() {
   moreOpen.value = false;
   emit("set-page", "hardware");
-}
-
-function goSettings() {
-  moreOpen.value = false;
-  emit("set-page", "settings");
 }
 
 /* 外观/背景主题 */
@@ -143,10 +142,8 @@ async function loadNotifications() {
     notifyBusy.value = false;
   }
 }
-async function toggleNotify() {
-  notifyOpen.value = !notifyOpen.value;
-  moreOpen.value = false;
-  if (notifyOpen.value) await loadNotifications();
+function onNotifyMenu(open: boolean) {
+  if (open) void loadNotifications();
 }
 async function deleteNotify(id: unknown) {
   try {
@@ -282,39 +279,57 @@ async function simStop() {
 
         <button class="chip-btn" type="button" @click="openTheme">外观</button>
 
-        <div class="notify-wrap">
-          <button class="chip-btn" type="button" @click="toggleNotify">
-            通知{{ notifyCount() ? ` (${notifyCount()})` : "" }}
-          </button>
-          <div v-if="notifyOpen" class="notify-pop">
-            <div class="notify-head">
-              <strong>通知中心</strong>
-              <button class="mini" type="button" :disabled="notifyBusy" @click="loadNotifications">刷新</button>
-              <button class="mini" type="button" @click="clearNotify">清空</button>
-            </div>
-            <p v-if="notifyMsg" class="notify-msg">{{ notifyMsg }}</p>
-            <div class="notify-list">
-              <div v-if="!notifyItems.length && !notifyBusy" class="notify-empty">暂无通知</div>
-              <div v-for="item in notifyItems" :key="item.id" class="notify-item">
-                <div class="notify-line">
-                  <span class="ntag" :class="notifyKind(item)">{{ notifyKind(item) }}</span>
-                  <span class="ntime">{{ notifyTime(item.ts) }}</span>
-                  <button class="mini" type="button" @click="deleteNotify(item.id)">删</button>
-                </div>
-                <div class="ntext">{{ item.text }}</div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <VMenu v-model="notifyOpen" location="bottom end" :close-on-content-click="false" :max-width="420" @update:model-value="onNotifyMenu">
+          <template #activator="{ props: notifyActivator }">
+            <VBtn v-bind="notifyActivator" variant="tonal" size="small" class="chip-gap">
+              <VBadge :content="notifyCount()" :model-value="notifyCount() > 0" color="error" inline>
+                <VIcon>mdi-bell-outline</VIcon>
+              </VBadge>
+              <span class="ms-1">通知</span>
+            </VBtn>
+          </template>
+          <VCard max-width="420" max-height="62vh" class="d-flex flex-column">
+            <VToolbar density="compact" color="transparent">
+              <VToolbarTitle class="text-body-2">通知中心</VToolbarTitle>
+              <VBtn variant="text" size="small" :disabled="notifyBusy" @click="loadNotifications">刷新</VBtn>
+              <VBtn variant="text" size="small" @click="clearNotify">清空</VBtn>
+            </VToolbar>
+            <p v-if="notifyMsg" class="px-3 text-caption text-error mb-0">{{ notifyMsg }}</p>
+            <VList density="compact" class="overflow-y-auto">
+              <VListItem v-if="!notifyItems.length && !notifyBusy">
+                <VListItemTitle class="text-caption text-medium-emphasis">暂无通知</VListItemTitle>
+              </VListItem>
+              <VListItem v-for="item in notifyItems" :key="item.id">
+                <template #prepend>
+                  <VChip
+                    size="x-small"
+                    variant="tonal"
+                    label
+                    :color="notifyKind(item) === 'error' ? 'error' : notifyKind(item) === 'warn' ? 'warning' : 'info'"
+                  >{{ notifyKind(item) }}</VChip>
+                </template>
+                <VListItemTitle class="text-body-2 text-wrap">{{ item.text }}</VListItemTitle>
+                <template #append>
+                  <div class="d-flex align-center ga-2">
+                    <span class="text-caption text-medium-emphasis text-nowrap">{{ notifyTime(item.ts) }}</span>
+                    <VBtn icon="mdi-delete-outline" size="x-small" variant="text" @click="deleteNotify(item.id)" />
+                  </div>
+                </template>
+              </VListItem>
+            </VList>
+          </VCard>
+        </VMenu>
 
-        <div class="more-wrap">
-          <button class="chip-btn" type="button" @click="toggleMore">更多</button>
-          <div v-if="moreOpen" class="more-pop">
-            <button type="button" @click="openSim">模拟目标</button>
-            <button type="button" @click="navTo('/logs')">日志</button>
-            <button type="button" @click="goHardware">硬件助手</button>
-          </div>
-        </div>
+        <VMenu v-model="moreOpen" location="bottom end" :close-on-content-click="true">
+          <template #activator="{ props: moreActivator }">
+            <VBtn v-bind="moreActivator" variant="tonal" size="small" class="chip-gap">更多</VBtn>
+          </template>
+          <VList density="compact" min-width="190">
+            <VListItem prepend-icon="mdi-crosshairs-gps" title="模拟目标" @click="moreOpen = false; openSim()" />
+            <VListItem prepend-icon="mdi-text-box-outline" title="日志" @click="navTo('/logs')" />
+            <VListItem prepend-icon="mdi-usb-flash-drive-outline" title="硬件助手" @click="goHardware" />
+          </VList>
+        </VMenu>
       </div>
     </div>
 
