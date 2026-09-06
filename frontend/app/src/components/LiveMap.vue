@@ -28,6 +28,7 @@ const prevPos = new Map<string, { lat: number; lon: number }>();
 let fittedOnce = false;
 
 let selectedSn = "";
+let userHiddenSn = "";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let trackLayer: any = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -302,7 +303,7 @@ function ensurePilotMark() {
 
 // 实时续画：每帧把新位置追加到已画轨迹，并移动飞手点
 function updateSelectedLive() {
-  if (!map || !selectedSn) return;
+  if (!map || !selectedSn || userHiddenSn === selectedSn) return;
   const live = liveRow(selectedSn);
   const pt = livePoint(live);
   if (!pt) return;
@@ -407,10 +408,13 @@ function applyDrones() {
         .bindTooltip(tooltip, { sticky: true })
         .on("click", () => {
           if (selectedSn === sn) {
-            // 再次点击同一图标：隐藏轨迹
+            // 再次点击同一图标：隐藏轨迹（并让在途历史请求失效）
             selectedSn = "";
+            userHiddenSn = sn;
+            selectSeq++; // 使历史回填请求的 seq 校验失败，避免延迟到达后重画
             clearTrackLayer();
           } else {
+            userHiddenSn = "";
             selectDrone(sn);
           }
         });
@@ -427,6 +431,7 @@ function applyDrones() {
         selectedSn = "";
         clearTrackLayer();
       }
+      if (sn === userHiddenSn) userHiddenSn = "";
     }
   }
   // 被选中的目标持续续画轨迹
