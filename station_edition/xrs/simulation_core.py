@@ -224,15 +224,31 @@ def _simulation_update_target(target: dict, options: dict, elapsed: float, now: 
         "source": "simulation",
         "coordinate_system": "WGS84",
     }
-    # Simulation owns this canonical store, so mutate it directly. Re-sanitizing
-    # the full trajectory on every tick would make long demos progressively
-    # more expensive.
+    # Simulation owns this canonical sequence, so append directly and cheaply.
+    # Re-sanitizing the whole trajectory every tick makes long-running demos
+    # progressively more expensive (O(n^2)), which saturates the CPU.
     tracks = entry.get("tracks")
     if not isinstance(tracks, dict):
         tracks = _empty_track_store()
-    _track_store_append_sample(tracks, sample)
+    seq = tracks.get("aircraft")
+    if not isinstance(seq, list):
+        seq = []
+    # Mirror _track_store_append_sample dedup rules without rebuilding the list
+    if seq and (
+        abs(float(seq[-1].get("lat") or 0.0) - float(sample["lat"])) < 1e-7
+        and abs(float(seq[-1].get("lon") or 0.0) - float(sample["lon"])) < 1e-7
+        and (seq[-1].get("timestamp_ms") == sample["timestamp_ms"] or sample["timestamp_ms"] is None)
+    ):
+        seq[-1] = sample
+    else:
+        seq.append(sample)
+        limit = _track_store_points_limit()
+        if len(seq) > limit:
+            seq = seq[-limit:]
+    tracks["aircraft"] = seq
+    tracks["last_aircraft"] = dict(sample)
     entry["tracks"] = tracks
-    entry["track"] = _track_store_primary(tracks, "aircraft")
+    entry["track"] = seq
     entry["track_updated_wall_ts"] = now_wall
 
 
