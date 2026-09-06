@@ -3,12 +3,21 @@ import { computed, ref } from "vue";
 import { useLiveSocket, type DroneRow } from "../composables/useLiveSocket";
 import AppHeader from "../components/AppHeader.vue";
 import LiveMap from "../components/LiveMap.vue";
+import HardwareAssistant from "../components/HardwareAssistant.vue";
 import HistoryView from "./HistoryView.vue";
 
-const state = useLiveSocket();
-const page = ref<"live" | "history">("live");
+type PageKey = "live" | "history" | "hardware";
 
-function setPage(p: "live" | "history") {
+function initialPage(): PageKey {
+  const p = window.location.pathname.split("?")[0];
+  if (p === "/hardware-assistant" || p === "/hardware-assistant.html") return "hardware";
+  return "live";
+}
+
+const state = useLiveSocket();
+const page = ref<PageKey>(initialPage());
+
+function setPage(p: PageKey) {
   page.value = p;
 }
 
@@ -136,6 +145,7 @@ function logCls(row: unknown): string {
       </div>
     </template>
 
+    <HardwareAssistant v-else-if="page === 'hardware'" />
     <HistoryView v-else :rows="state.drones" />
   </div>
 </template>

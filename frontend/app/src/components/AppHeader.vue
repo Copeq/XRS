@@ -3,8 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { postJson, pageFetch } from "../composables/pageApi";
 import type { HomeState } from "../composables/useLiveSocket";
 
-const props = defineProps<{ state: HomeState; page: "live" | "history" }>();
-const emit = defineEmits<{ (e: "set-page", p: "live" | "history"): void }>();
+const props = defineProps<{ state: HomeState; page: "live" | "history" | "hardware" }>();
+const emit = defineEmits<{ (e: "set-page", p: "live" | "history" | "hardware"): void }>();
 
 type MetaRecord = Record<string, unknown>;
 
@@ -88,6 +88,11 @@ function toggleMore() {
 function navTo(href: string) {
   moreOpen.value = false;
   window.location.href = href;
+}
+
+function goHardware() {
+  moreOpen.value = false;
+  emit("set-page", "hardware");
 }
 
 /* 通知中心 */
@@ -288,7 +293,7 @@ async function simStop() {
             <button type="button" @click="navTo('/settings')">设置</button>
             <button type="button" @click="openSim">模拟目标</button>
             <button type="button" @click="navTo('/logs')">日志</button>
-            <button type="button" @click="navTo('/hardware-assistant')">硬件助手</button>
+            <button type="button" @click="goHardware">硬件助手</button>
           </div>
         </div>
       </div>
@@ -308,6 +313,7 @@ async function simStop() {
     <nav class="app-tab-nav">
       <button class="app-tab-btn" :class="{ active: page === 'live' }" type="button" @click="emit('set-page', 'live')">实时</button>
       <button class="app-tab-btn" :class="{ active: page === 'history' }" type="button" @click="emit('set-page', 'history')">历史记录</button>
+      <button class="app-tab-btn" :class="{ active: page === 'hardware' }" type="button" @click="emit('set-page', 'hardware')">硬件助手</button>
     </nav>
 
     <!-- 模拟目标弹窗 -->

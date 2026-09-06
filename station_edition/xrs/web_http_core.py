@@ -502,6 +502,13 @@ def http_server_thread() -> None:
                 self.wfile.write(body)
                 return True
             if path in ("/hardware-assistant", "/hardware-assistant.html"):
+                # Vue 前端模式下硬件助手已并入 SPA（HomeLive 内 hardware 页）；
+                # legacy 模式继续使用 web_server.py 的内嵌模板。
+                if _vue_frontend_enabled():
+                    frontend_index = _frontend_index_path()
+                    if frontend_index is not None:
+                        self._send_html_file(frontend_index)
+                        return True
                 body = _HW_PAGE_HTML.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
