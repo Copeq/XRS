@@ -347,11 +347,11 @@ async function simStop() {
       </div>
     </div>
 
-    <VTabs v-model="pageModel" color="primary" density="compact" class="app-tab-nav" show-arrows>
-      <VTab value="live">实时</VTab>
-      <VTab value="history">历史记录</VTab>
-      <VTab value="hardware">硬件助手</VTab>
-      <VTab value="settings">设置</VTab>
+    <VTabs v-model="pageModel" color="primary" density="compact" class="app-tab-nav">
+      <VTab value="live"><VIcon size="small" class="me-1">mdi-radar</VIcon>实时</VTab>
+      <VTab value="history"><VIcon size="small" class="me-1">mdi-history</VIcon>历史记录</VTab>
+      <VTab value="hardware"><VIcon size="small" class="me-1">mdi-router-wireless</VIcon>硬件助手</VTab>
+      <VTab value="settings"><VIcon size="small" class="me-1">mdi-cog-outline</VIcon>设置</VTab>
     </VTabs>
 
     <!-- 模拟目标弹窗 -->
@@ -725,19 +725,37 @@ async function simStop() {
 }
 
 .app-tab-nav {
-  display: flex;
-  gap: 4px;
-  padding: 0 14px 8px;
+  padding: 0 14px 4px;
 }
 
-.app-tab-btn {
-  border: none;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
+.app-tab-nav :deep(.v-tabs),
+.app-tab-nav :deep(.v-slide-group) {
+  background: transparent;
 }
 
-.app-tab-btn.active {
-  border-bottom-color: var(--blue);
+.app-tab-nav :deep(.v-tab) {
+  color: var(--muted);
+  font-weight: 500;
+  min-width: 96px;
+  border-radius: 8px 8px 0 0;
+  letter-spacing: 0.01em;
+}
+
+.app-tab-nav :deep(.v-tab:hover) {
+  color: var(--txt);
+}
+
+.app-tab-nav :deep(.v-tab--selected) {
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 14%, transparent);
+}
+
+.app-tab-nav :deep(.v-tab--selected .v-icon) {
+  color: var(--blue);
+}
+
+.app-tab-nav :deep(.v-tab .v-icon) {
+  font-size: 16px;
 }
 
 .modal-mask {
