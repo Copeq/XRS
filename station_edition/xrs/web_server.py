@@ -6231,9 +6231,9 @@ header.app-shell-header h1{
 .main-more-pop{position:absolute;right:0;top:calc(100% + 8px);display:none;min-width:170px;padding:8px;border:1px solid var(--border);border-radius:14px;background:var(--panel);box-shadow:0 12px 28px rgba(15,23,42,.10);z-index:45}
 .main-more-menu.open .main-more-pop{display:grid;gap:6px}
 .main-more-pop .header-link-btn{width:100%;text-align:left;box-shadow:none}
-.simulation-modal{position:fixed;inset:0;z-index:12000;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(4,10,20,.56);backdrop-filter:blur(8px)}
+.simulation-modal{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483600;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(4,10,20,.62);backdrop-filter:blur(8px);pointer-events:auto}
 .simulation-modal.show{display:flex}
-.simulation-card{width:min(520px,96vw);max-height:calc(100dvh - 48px);overflow:auto;border:1px solid var(--border);border-radius:18px;background:var(--panel);box-shadow:var(--shadow-lg)}
+.simulation-card{width:min(520px,96vw);max-height:calc(100vh - 48px);overflow:auto;border:1px solid var(--border);border-radius:18px;background:var(--panel);box-shadow:var(--shadow-lg)}
 .simulation-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 20px;border-bottom:1px solid var(--border)}
 .simulation-title{display:grid;gap:5px}.simulation-title strong{font-size:18px}.simulation-title span{font-size:12px;color:var(--dim)}
 .simulation-body{display:grid;gap:16px;padding:20px}
