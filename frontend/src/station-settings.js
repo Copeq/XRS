@@ -2901,6 +2901,8 @@ async function loadVisual(opts){
   qs('cfg-model-map').value = String(b.model_map || '');
   qs('cfg-model-update-enabled').checked = mu.enabled !== false;
   qs('cfg-app-update-enabled').checked = au.enabled !== false;
+  var appUpdateCard = qs('settings-app-update');
+  if(appUpdateCard) appUpdateCard.style.display = au.enabled === false ? 'none' : '';
   if(qs('cfg-app-update-force')) qs('cfg-app-update-force').checked = !!au.force_update;
   if(qs('cfg-app-update-custom-mirror')) qs('cfg-app-update-custom-mirror').value = String(au.custom_mirror || '');
   renderAppUpdateMirrorOptions(au);
