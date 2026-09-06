@@ -272,6 +272,9 @@ function applyVisual(visual: Dict) {
   form.login_passkey = methods.includes("passkey");
   form.auth_username = "";
   form.auth_password = "";
+  authConfigured.value = !!at.configured;
+  ssoLinks.value = Array.isArray(at.sso_links) ? (at.sso_links as Array<Dict>) : [];
+  passkeys.value = Array.isArray(at.passkeys) ? (at.passkeys as Array<Dict>) : [];
   /* 机型库更新 */
   const mu = (visual.model_update ?? {}) as Dict;
   form.model_enabled = mu.enabled !== false;
@@ -658,6 +661,232 @@ async function copyTokenSecret() {
     notify("已复制到剪贴板", false);
   } catch (_e) {
     notify("复制失败，请手动选中复制", true);
+  }
+}
+
+/* ------- SSO 登录链接 / 通行密钥 ------- */
+const authConfigured = ref(false);
+const ssoLinks = ref<Array<Dict>>([]);
+const passkeys = ref<Array<Dict>>([]);
+const ssoName = ref("");
+const ssoUser = ref("");
+const ssoPass = ref("");
+const ssoExpireMode = ref("86400");
+const ssoSingleUse = ref(false);
+const ssoUrl = ref("");
+const passkeyName = ref("");
+const passkeyUser = ref("");
+const passkeyPass = ref("");
+
+function bytesToB64u(data: Uint8Array): string {
+  let bin = "";
+  data.forEach((b) => {
+    bin += String.fromCharCode(b);
+  });
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64uToBytes(s: string): Uint8Array {
+  const clean = String(s || "").replace(/-/g, "+").replace(/_/g, "/");
+  const pad = clean.length % 4 === 0 ? "" : "=".repeat(4 - (clean.length % 4));
+  const bin = atob(clean + pad);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function fmtSsoExpiry(item: Dict): string {
+  const at = Number(item.expires_at ?? 0);
+  if (!Number.isFinite(at) || at <= 0) return "无限时间";
+  const left = Math.max(0, at - Date.now() / 1000);
+  if (left <= 0) return "已过期";
+  if (left < 3600) return `${Math.max(1, Math.round(left / 60))} 分钟`;
+  if (left < 86400) return `${Math.round(left / 3600)} 小时`;
+  return `${Math.round(left / 86400)} 天`;
+}
+function fmtTs(v: unknown): string {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  try {
+    return new Date(n * 1000).toLocaleString();
+  } catch {
+    return "";
+  }
+}
+
+async function refreshAuthListsFromView() {
+  try {
+    const d = (await pageFetch("/api/settings/view")) as Dict;
+    const visual = (d.visual as Dict) ?? {};
+    const at = (visual.auth as Dict) ?? {};
+    authConfigured.value = !!at.configured;
+    ssoLinks.value = Array.isArray(at.sso_links) ? (at.sso_links as Array<Dict>) : [];
+    passkeys.value = Array.isArray(at.passkeys) ? (at.passkeys as Array<Dict>) : [];
+  } catch (_e) {
+    /* ignore */
+  }
+}
+
+function authReadyForExtra(): boolean {
+  return !!form.auth_enabled && authConfigured.value;
+}
+
+async function createSsoLink() {
+  if (!authReadyForExtra()) {
+    notify("需先启用网页登录并配置账号密码", true);
+    return;
+  }
+  const user = text(ssoUser, "").trim();
+  const pass = ssoPass;
+  if (!user || !pass) {
+    notify("请输入网页登录账号和密码（用于创建 SSO 校验码）", true);
+    return;
+  }
+  toolBusy.value = "sso-create";
+  ssoUrl.value = "";
+  try {
+    const body: Dict = {
+      name: text(ssoName, "").trim(),
+      next: "/",
+      single_use: ssoSingleUse.value,
+      username: user,
+      password: pass,
+    };
+    const mode = ssoExpireMode.value;
+    if (mode === "never") body.expires = "never";
+    else if (mode === "custom") body.ttl_min = Math.max(1, 1440);
+    else body.ttl_sec = Math.max(60, Number(mode || 86400) || 86400);
+    const d = (await postJson("/api/settings/login-link/create", body)) as Dict;
+    if (d.ok === false) {
+      notify(text(d.error, "创建失败"), true);
+      return;
+    }
+    ssoUrl.value = text(d.url ?? d.path, "");
+    ssoLinks.value = Array.isArray(d.links) ? (d.links as Array<Dict>) : ssoLinks.value;
+    const expireText = d.expires_at ? fmtTs(d.expires_at) : "无限时间";
+    notify(`SSO 链接已创建${text(d.check, "") ? `，校验码 ${text(d.check, "").slice(0, 10)}…` : ""}（${expireText}${ssoSingleUse.value ? "，单次登录" : ""}）`, false);
+    ssoName.value = "";
+    ssoPass.value = "";
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  } finally {
+    toolBusy.value = "";
+  }
+}
+
+async function deleteSsoLink(check: string) {
+  if (!window.confirm("删除该 SSO 校验码后，对应链接立即失效。继续？")) return;
+  try {
+    const d = (await postJson("/api/settings/login-link/delete", { check })) as Dict;
+    if (d.ok === false) {
+      notify(text(d.error, "删除失败"), true);
+      return;
+    }
+    ssoLinks.value = Array.isArray(d.links) ? (d.links as Array<Dict>) : [];
+    notify("SSO 链接已删除", false);
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  }
+}
+
+async function copySsoUrl() {
+  try {
+    await navigator.clipboard.writeText(ssoUrl.value);
+    notify("已复制 SSO 链接", false);
+  } catch (_e) {
+    notify("复制失败，请手动复制", true);
+  }
+}
+
+async function createPasskey() {
+  if (!authReadyForExtra() || !form.login_passkey) {
+    notify("需先启用网页登录且允许通行密钥", true);
+    return;
+  }
+  if (!window.PublicKeyCredential || !navigator.credentials || !navigator.credentials.create) {
+    notify("当前浏览器不支持通行密钥创建", true);
+    return;
+  }
+  const user = text(passkeyUser, "").trim();
+  const pass = passkeyPass;
+  if (!user || !pass) {
+    notify("请输入网页登录账号和密码（用于通行密钥登记）", true);
+    return;
+  }
+  toolBusy.value = "passkey-create";
+  try {
+    const name = text(passkeyName, "").trim();
+    const start = (await postJson("/api/settings/passkey/start", { username: user, password: pass, name })) as Dict;
+    if (start.ok === false) {
+      notify(text(start.error, "启动通行密钥登记失败"), true);
+      return;
+    }
+    const pk = (start.publicKey ?? {}) as Dict;
+    const challengeRaw = text(pk.challenge ?? start.challenge ?? start.challenge_token, "");
+    const createOptions = {
+      publicKey: {
+        challenge: b64uToBytes(challengeRaw),
+        rp: (pk.rp as Dict) ?? { name: text(start.realm, "XRS"), id: start.rp_id || location.hostname },
+        user: {
+          id: b64uToBytes(text(((pk.user as Dict)?.id as unknown) ?? "", "")),
+          name: text(((pk.user as Dict)?.name as unknown) ?? user, user),
+          displayName: text(((pk.user as Dict)?.displayName as unknown) ?? (name || user), name || user),
+        },
+        pubKeyCredParams: (pk.pubKeyCredParams as Array<Dict>) ?? [{ type: "public-key", alg: -7 }],
+        timeout: num(pk.timeout ?? start.timeout_ms ?? 300000, 300000),
+        attestation: text(pk.attestation, "none") || "none",
+        authenticatorSelection: (pk.authenticatorSelection as Dict) ?? { userVerification: "preferred", residentKey: "preferred" },
+        excludeCredentials: ((pk.excludeCredentials as Array<Dict>) ?? []).map((item) => ({
+          type: "public-key",
+          id: b64uToBytes(text(item.id, "")),
+        })),
+      },
+    } as unknown as CredentialCreationOptions;
+    const cred = (await navigator.credentials.create(createOptions)) as PublicKeyCredential | null;
+    if (!cred) {
+      notify("未获取到通行密钥凭据（可能已取消）", true);
+      return;
+    }
+    const resp = cred.response as AuthenticatorAttestationResponse;
+    const finish = (await postJson("/api/settings/passkey/finish", {
+      challenge: challengeRaw || start.challenge_token || start.challenge || "",
+      id: cred.id || "",
+      rawId: bytesToB64u(new Uint8Array(cred.rawId)),
+      type: cred.type || "public-key",
+      response: {
+        clientDataJSON: bytesToB64u(new Uint8Array(resp.clientDataJSON)),
+        attestationObject: bytesToB64u(new Uint8Array(resp.attestationObject)),
+        userHandle: (resp as unknown as Dict).userHandle ? bytesToB64u(new Uint8Array((resp as unknown as Dict).userHandle as ArrayBuffer)) : "",
+      },
+      name,
+      username: user,
+      next: "/",
+    })) as Dict;
+    if (finish.ok === false) {
+      notify(text(finish.error, "通行密钥登记失败"), true);
+      return;
+    }
+    passkeys.value = Array.isArray(finish.passkeys) ? (finish.passkeys as Array<Dict>) : passkeys.value;
+    passkeyName.value = "";
+    passkeyPass.value = "";
+    notify("通行密钥已添加，可直接用于网页登录", false);
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  } finally {
+    toolBusy.value = "";
+  }
+}
+
+async function deletePasskey(id: string) {
+  if (!window.confirm("删除该通行密钥后不可恢复。继续？")) return;
+  try {
+    const d = (await postJson("/api/settings/passkey/delete", { id })) as Dict;
+    if (d.ok === false) {
+      notify(text(d.error, "删除失败"), true);
+      return;
+    }
+    passkeys.value = Array.isArray(d.passkeys) ? (d.passkeys as Array<Dict>) : [];
+    notify("通行密钥已删除", false);
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
   }
 }
 
@@ -1177,6 +1406,100 @@ onMounted(() => {
             <VSwitch v-model="form.login_password" label="允许密码登录" color="primary" hide-details />
             <VSwitch v-model="form.login_passkey" label="允许通行密钥" color="primary" hide-details />
           </div>
+        </section>
+
+        <!-- SSO 登录链接 -->
+        <section class="st-card">
+          <h2>SSO 登录链接</h2>
+          <VChip v-if="!form.auth_enabled || !authConfigured" color="warning" variant="tonal" label class="mb-2">
+            需先启用网页登录并配置账号密码
+          </VChip>
+          <VChip v-else variant="tonal" label class="mb-2">SSO 链接优先于其他登录方式，可一键登录</VChip>
+          <div v-if="!ssoLinks.length" class="muted-note mb-2">暂无 SSO 登录链接</div>
+          <div v-else v-for="(item, idx) in ssoLinks" :key="text(item.check, String(idx))" class="list-box mb-2">
+            <div class="d-flex align-center ga-2">
+              <span class="mono flex-grow-1">{{ text(item.name, `SSO 链接 ${idx + 1}`) }}</span>
+              <VChip size="x-small" variant="tonal" label :color="String(item.status ?? (item.active === false ? 'expired' : 'active')) === 'active' ? 'success' : 'default'">
+                {{ text(item.status_label ?? (String(item.status ?? (item.active === false ? "expired" : "active")) === "active" ? "可用" : "不可用"), "-") }}
+              </VChip>
+              <VChip size="x-small" variant="tonal" label>{{ fmtSsoExpiry(item) }}</VChip>
+              <VChip size="x-small" variant="tonal" label>{{ item.single_use ? "单次" : "多次" }}</VChip>
+              <VChip v-if="text(item.check, '')" size="x-small" variant="tonal" label class="mono">{{ text(item.check, "").slice(0, 12) }}…</VChip>
+              <VBtn icon="mdi-delete-outline" size="x-small" variant="text" @click="deleteSsoLink(text(item.check, ''))" />
+            </div>
+          </div>
+          <VDivider class="my-3" />
+          <div class="d-flex ga-2 mb-2">
+            <VTextField v-model="ssoName" label="链接名称(可选)" density="compact" variant="outlined" hide-details class="flex-grow-1" />
+            <VSelect
+              v-model="ssoExpireMode"
+              label="有效期"
+              :items="[
+                { title: '1 小时', value: '3600' },
+                { title: '1 天', value: '86400' },
+                { title: '7 天', value: '604800' },
+                { title: '无限期', value: 'never' },
+              ]"
+              density="compact"
+              variant="outlined"
+              hide-details
+            />
+            <VSwitch v-model="ssoSingleUse" label="单次登录" color="primary" hide-details class="ms-1" />
+          </div>
+          <div class="d-flex ga-2 mb-2">
+            <VTextField v-model="ssoUser" label="网页账号" density="compact" variant="outlined" hide-details />
+            <VTextField v-model="ssoPass" label="网页密码" type="password" density="compact" variant="outlined" hide-details />
+            <VBtn size="small" color="primary" :disabled="!form.auth_enabled || !authConfigured" :loading="toolBusy === 'sso-create'" @click="createSsoLink">创建链接</VBtn>
+          </div>
+          <VAlert v-if="ssoUrl" type="success" variant="tonal" class="mt-1">
+            <div class="d-flex align-center ga-2">
+              <code class="mono token-secret">{{ ssoUrl }}</code>
+              <VBtn size="x-small" variant="outlined" @click="copySsoUrl">复制</VBtn>
+            </div>
+            <div class="muted-note mt-1">链接仅显示一次，请立即保存。</div>
+          </VAlert>
+        </section>
+
+        <!-- 通行密钥 -->
+        <section class="st-card">
+          <h2>通行密钥 (Passkey)</h2>
+          <VChip v-if="!form.auth_enabled || !authConfigured" color="warning" variant="tonal" label class="mb-2">需先启用网页登录并配置账号密码</VChip>
+          <VChip v-else-if="!form.login_passkey" color="warning" variant="tonal" label class="mb-2">网页鉴权需允许通行密钥</VChip>
+          <VChip v-else variant="tonal" label class="mb-2">已登记的通行密钥可以直接登录网页</VChip>
+          <div v-if="!passkeys.length" class="muted-note mb-2">暂无通行密钥</div>
+          <div v-else v-for="(item, idx) in passkeys" :key="text(item.id, String(idx))" class="list-box mb-2">
+            <div class="d-flex align-center ga-2">
+              <div class="flex-grow-1">
+                <div class="d-flex align-center ga-2">
+                  <span class="mono">{{ text(item.name, `通行密钥 ${idx + 1}`) }}</span>
+                  <VChip size="x-small" variant="tonal" label :color="item.enabled === false ? 'default' : 'success'">{{ item.enabled === false ? "已停用" : "已启用" }}</VChip>
+                  <VChip size="x-small" variant="tonal" label>签名计数 {{ num(item.sign_count, 0) }}</VChip>
+                </div>
+                <div class="muted-note">
+                  {{
+                    `创建时间 ${text(item.created_ts ? fmtTs(item.created_ts) : "-", "-")} | 上次使用 ${text(item.last_used_ts ? fmtTs(item.last_used_ts) : "未使用", "未使用")}`
+                  }}
+                </div>
+              </div>
+              <VBtn icon="mdi-delete-outline" size="x-small" variant="text" @click="deletePasskey(text(item.id, ''))" />
+            </div>
+          </div>
+          <VDivider class="my-3" />
+          <div class="d-flex ga-2 mb-2">
+            <VTextField v-model="passkeyName" label="密钥名称(可选)" density="compact" variant="outlined" hide-details class="flex-grow-1" />
+            <VTextField v-model="passkeyUser" label="网页账号" density="compact" variant="outlined" hide-details />
+            <VTextField v-model="passkeyPass" label="网页密码" type="password" density="compact" variant="outlined" hide-details />
+          </div>
+          <VBtn
+            size="small"
+            color="primary"
+            :disabled="!form.auth_enabled || !authConfigured || !form.login_passkey"
+            :loading="toolBusy === 'passkey-create'"
+            @click="createPasskey"
+          >
+            添加通行密钥
+          </VBtn>
+          <div class="muted-note mt-1">需要 HTTPS 或 localhost 安全上下文，并配合浏览器/系统认证器弹窗完成登记。</div>
         </section>
 
         <!-- 机型库与主机指标 -->
