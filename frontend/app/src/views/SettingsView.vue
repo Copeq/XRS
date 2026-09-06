@@ -106,6 +106,12 @@ const snack = reactive({ show: false, text: "", error: false });
 
 /* 只读总览 */
 const overview = reactive<Dict>({});
+const hostIps = ref<string[]>([]);
+const hostCpuMem = ref("");
+const hostLoad = ref("");
+const hostUptime = ref("");
+const hostTemp = ref("");
+const hostTempSrc = ref("");
 const ifaceOptions = ref<Array<{ title: string; value: string }>>([]);
 const lastPayloadJson = ref("");
 const configDirty = computed(() => JSON.stringify(buildVisualPayload()) !== lastPayloadJson.value);
@@ -303,6 +309,51 @@ function applyVisual(visual: Dict) {
   auMirrorOptions.value = opts;
 }
 
+function fmtUptime(sec: unknown): string {
+  const s = Math.floor(Number(sec ?? 0));
+  if (!Number.isFinite(s) || s < 0) return "";
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return [d ? `${d}天` : "", h ? `${h}时` : "", `${m}分`].filter(Boolean).join("");
+}
+
+function syncHostExtras(view: Dict) {
+  const h = (view.host as Dict) ?? {};
+  hostIps.value = Array.isArray(h.local_ips) ? (h.local_ips as Array<unknown>).map((x) => String(x)) : [];
+  const cpu = Number(h.cpu_percent);
+  const mem = Number(h.mem_percent);
+  hostCpuMem.value = Number.isFinite(cpu) && Number.isFinite(mem) ? `CPU ${cpu.toFixed(1)}% · 内存 ${mem.toFixed(1)}%` : "";
+  const l1 = Number(h.load1);
+  const l5 = Number(h.load5);
+  const l15 = Number(h.load15);
+  hostLoad.value = Number.isFinite(l1) && Number.isFinite(l5) && Number.isFinite(l15) ? `${l1.toFixed(2)} / ${l5.toFixed(2)} / ${l15.toFixed(2)}` : "";
+  hostUptime.value = fmtUptime(h.uptime_sec);
+  const t = Number(h.temperature_c);
+  hostTemp.value = Number.isFinite(t) ? `${t.toFixed(1)}°C` : "";
+  hostTempSrc.value = text(h.temperature_source_label, "");
+}
+
+async function refreshHost() {
+  try {
+    const d = (await pageFetch("/api/settings/view")) as Dict;
+    const host = (d.host as Dict) ?? {};
+    Object.assign(overview, {
+      version: text(d.path ? text(host.app_version, "") : "", "-"),
+      host_name: text(host.hostname ?? host.name, "-"),
+      active_iface: text(host.active_iface, "-"),
+      channel: text(host.current_channel, "-"),
+      sn_state: text(((host.sniff_state as Dict) ?? {}).state, "-"),
+      sn_msg: text(((host.sniff_state as Dict) ?? {}).msg, "-"),
+      storage: text(((d.scan_data_file as Dict) ?? {}).path, "-"),
+    });
+    syncHostExtras(d);
+    notify("主机状态已刷新", false);
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  }
+}
+
 async function load() {
   loading.value = true;
   loadError.value = "";
@@ -320,6 +371,7 @@ async function load() {
       sn_msg: text(((view.host as Dict)?.sniff_state as Dict)?.msg ?? "-", "-"),
       storage: text(((view as Dict).scan_data_file as Dict)?.path ?? "-", "-"),
     });
+    syncHostExtras(view as Dict);
     const ifaces = Array.isArray((bind as Dict).interfaces) ? ((bind as Dict).interfaces as Array<Dict>) : [];
     const used = new Set<string>();
     ifaceOptions.value = ifaces
@@ -1543,7 +1595,23 @@ onMounted(() => {
             <dt>采集状态</dt><dd>{{ overview.sn_state }}</dd>
             <dt>采集说明</dt><dd class="wrap">{{ overview.sn_msg }}</dd>
             <dt>历史库</dt><dd class="mono wrap">{{ overview.storage }}</dd>
+            <template v-if="hostCpuMem">
+              <dt>CPU / 内存</dt><dd class="mono">{{ hostCpuMem }}</dd>
+            </template>
+            <template v-if="hostLoad">
+              <dt>负载 1/5/15</dt><dd class="mono">{{ hostLoad }}</dd>
+            </template>
+            <template v-if="hostTemp">
+              <dt>温度</dt><dd class="mono">{{ hostTemp }}<template v-if="hostTempSrc">（{{ hostTempSrc }}）</template></dd>
+            </template>
+            <template v-if="hostUptime">
+              <dt>运行时长</dt><dd>{{ hostUptime }}</dd>
+            </template>
+            <template v-if="hostIps.length">
+              <dt>本机 IP</dt><dd class="mono wrap">{{ hostIps.join(", ") }}</dd>
+            </template>
           </dl>
+          <VBtn size="small" variant="tonal" @click="refreshHost">刷新主机状态</VBtn>
         </section>
 
         <!-- 网卡与扫描 -->
