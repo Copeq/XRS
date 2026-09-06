@@ -1499,42 +1499,123 @@ async function loadMetrics() {
   }
 }
 
-function seriesNums(key: string): Array<{ x: number; y: number }> {
-  const pts: Array<{ x: number; y: number }> = [];
-  metricItems.value.forEach((it, i) => {
-    const y = Number(it[key]);
-    if (Number.isFinite(y)) pts.push({ x: i, y });
-  });
-  return pts;
+/* ---------- 指标曲线坐标轴 ---------- */
+const SPARK_W = 640;
+const SPARK_H = 130;
+const SPARK_LPAD = 44;
+const SPARK_RPAD = 10;
+const SPARK_TPAD = 8;
+const SPARK_BPAD = 22;
+
+function fmtMetricTime(ts: number, win: string): string {
+  if (!Number.isFinite(ts)) return "";
+  const d = new Date(ts * 1000);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  if (/(^|\D)7d$/.test(win)) {
+    const mo = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${mo}-${dd}`;
+  }
+  return `${hh}:${mm}`;
+}
+
+function fmtMetricValue(v: number): string {
+  if (!Number.isFinite(v)) return "";
+  if (Math.abs(v) >= 100) return String(Math.round(v));
+  if (Math.abs(v) >= 10) return v.toFixed(0);
+  return v.toFixed(1);
+}
+
+function buildMetricAxis(items: Array<Dict>, key: string, win: string) {
+  if (!items.length) return null;
+  const times: Array<number> = [];
+  const vals: Array<number> = [];
+  for (const it of items) {
+    const ts = Number(it.ts);
+    const y = Number((it as Record<string, unknown>)[key]);
+    if (Number.isFinite(ts) && Number.isFinite(y)) {
+      times.push(ts);
+      vals.push(y);
+    }
+  }
+  if (!times.length) return null;
+  const tMin = Math.min(...times);
+  const tMax = Math.max(...times);
+  let vMin = Math.min(...vals);
+  let vMax = Math.max(...vals);
+  if (Math.abs(vMax - vMin) < 1e-6) {
+    const pad = Math.max(1, Math.abs(vMin) * 0.1);
+    vMin -= pad;
+    vMax += pad;
+  } else {
+    const pad = (vMax - vMin) * 0.08;
+    vMin -= pad;
+    vMax += pad;
+  }
+  const L = SPARK_LPAD;
+  const R = SPARK_W - SPARK_RPAD;
+  const T = SPARK_TPAD;
+  const B = SPARK_H - SPARK_BPAD;
+  const xSpan = Math.max(1e-6, R - L);
+  const ySpan = Math.max(1e-6, B - T);
+  const xTickCount = Math.min(6, items.length);
+  const xTicks: Array<{ x: number; ts: number; label: string }> = [];
+  for (let i = 0; i < xTickCount; i++) {
+    const r = i / (xTickCount - 1 || 1);
+    const ts = tMin + (tMax - tMin) * r;
+    const x = L + (tMax === tMin ? 0.5 : r) * xSpan;
+    xTicks.push({ x, ts, label: fmtMetricTime(ts, win) });
+  }
+  const yTickCount = 4;
+  const yTicks: Array<{ y: number; value: number; label: string }> = [];
+  for (let i = 0; i < yTickCount; i++) {
+    const r = i / (yTickCount - 1);
+    const v = vMin + (vMax - vMin) * r;
+    const y = B - r * ySpan;
+    yTicks.push({ y, value: v, label: fmtMetricValue(v) });
+  }
+  return { tMin, tMax, vMin, vMax, xTicks, yTicks };
+}
+
+const metricAxis = computed(() => buildMetricAxis(metricItems.value, metricSeries.value, metricWin.value));
+
+function seriesCoords(): Array<{ x: number; y: number }> {
+  const items = metricItems.value;
+  const key = metricSeries.value;
+  const axis = metricAxis.value;
+  if (!axis || !items.length) return [];
+  const L = SPARK_LPAD;
+  const R = SPARK_W - SPARK_RPAD;
+  const T = SPARK_TPAD;
+  const B = SPARK_H - SPARK_BPAD;
+  const xSpan = R - L;
+  const ySpan = B - T;
+  const out: Array<{ x: number; y: number }> = [];
+  for (const it of items) {
+    const ts = Number(it.ts);
+    const y = Number((it as Record<string, unknown>)[key]);
+    if (!Number.isFinite(ts) || !Number.isFinite(y)) continue;
+    const xr = axis.tMax === axis.tMin ? 0.5 : (ts - axis.tMin) / (axis.tMax - axis.tMin);
+    const yr = (y - axis.vMin) / (axis.vMax - axis.vMin);
+    out.push({ x: L + xr * xSpan, y: B - yr * ySpan });
+  }
+  return out;
 }
 
 function metricPath(): string {
-  const key = metricSeries.value;
-  const pts = seriesNums(key);
+  const pts = seriesCoords();
   if (!pts.length) return "";
-  const W = 640;
-  const H = 130;
-  const pad = 6;
-  const ys = pts.map((p) => p.y);
-  let minY = Math.min(...ys);
-  let maxY = Math.max(...ys);
-  if (maxY - minY < 1e-6) {
-    minY -= 1;
-    maxY += 1;
-  }
-  const n = pts.length;
-  const sx = (i: number) => (n > 1 ? pad + (i * (W - pad * 2)) / (n - 1) : W / 2);
-  const sy = (y: number) => H - pad - ((y - minY) * (H - pad * 2)) / (maxY - minY);
-  return pts.map((p, i) => `${sx(i).toFixed(1)},${sy(p.y).toFixed(1)}`).join(" ");
+  return pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
 }
 
 function seriesMetaText(): string {
-  const key = metricSeries.value;
-  const pts = seriesNums(key);
+  const pts = seriesCoords();
   if (!pts.length) return "暂无采样";
-  const last = pts[pts.length - 1].y;
-  const min = Math.min(...pts.map((p) => p.y));
-  const max = Math.max(...pts.map((p) => p.y));
+  const ys = pts.map((p) => p.y);
+  const last = ys[ys.length - 1];
+  const min = Math.min(...ys);
+  const max = Math.max(...ys);
   return `最新 ${last.toFixed(1)} · 最小 ${min.toFixed(1)} · 最大 ${max.toFixed(1)}`;
 }
 
@@ -2191,8 +2272,20 @@ onMounted(() => {
             <VChip v-if="metricMeta.enabled === false" color="warning" variant="tonal" label>指标采集未启用</VChip>
             <VChip variant="tonal" label>窗口 {{ metricMeta.window }} · 采样 {{ metricMeta.count }}</VChip>
           </div>
-          <div v-if="!seriesNums(metricSeries).length" class="muted-note">暂无采样数据</div>
+          <div v-if="!seriesCoords().length" class="muted-note">暂无采样数据</div>
           <svg v-else viewBox="0 0 640 130" preserveAspectRatio="none" class="spark" role="img" :aria-label="`${metricSeries} 趋势`">
+            <g v-if="metricAxis" class="metric-axis">
+              <line :x1="SPARK_LPAD" :x2="SPARK_W - SPARK_RPAD" :y1="SPARK_TPAD" :y2="SPARK_TPAD" stroke="var(--border)" stroke-opacity=".6" stroke-width="1" />
+              <line :x1="SPARK_W - SPARK_RPAD" :x2="SPARK_W - SPARK_RPAD" :y1="SPARK_TPAD" :y2="SPARK_H - SPARK_BPAD" stroke="var(--border)" stroke-opacity=".6" stroke-width="1" />
+              <g v-for="(t, i) in metricAxis.yTicks" :key="'y' + i">
+                <line :x1="SPARK_LPAD" :x2="SPARK_W - SPARK_RPAD" :y1="t.y" :y2="t.y" stroke="var(--border)" stroke-opacity=".18" />
+                <text :x="SPARK_LPAD - 6" :y="t.y + 3" text-anchor="end" fill="var(--muted)" font-size="10">{{ t.label }}</text>
+              </g>
+              <g v-for="(t, i) in metricAxis.xTicks" :key="'x' + i">
+                <line :x1="t.x" :x2="t.x" :y1="SPARK_TPAD" :y2="SPARK_H - SPARK_BPAD" stroke="var(--border)" stroke-opacity=".12" />
+                <text :x="t.x" :y="SPARK_H - 6" text-anchor="middle" fill="var(--muted)" font-size="10">{{ t.label }}</text>
+              </g>
+            </g>
             <polyline :points="metricPath()" fill="none" stroke="var(--blue)" stroke-width="2" />
           </svg>
           <div class="d-flex align-center ga-2 mt-1 mb-4">
