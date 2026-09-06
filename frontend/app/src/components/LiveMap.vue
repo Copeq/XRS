@@ -25,6 +25,10 @@ let zoneSig = "";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const droneMarkers = new Map<string, any>();
 const prevPos = new Map<string, { lat: number; lon: number }>();
+// 平滑动画：WS 约 1Hz，标记以指数趋近方式追向最新坐标，避免跳变
+const moveTargets = new Map<string, [number, number]>();
+let smoothRaf = 0;
+let lastSmoothAt = 0;
 let fittedOnce = false;
 
 let selectedSn = "";
@@ -435,7 +439,9 @@ function applyDrones() {
     const tooltip = `${sn}${d.model ? " · " + d.model : ""}`;
     const existing = droneMarkers.get(sn);
     if (existing) {
-      existing.setLatLng([lat, lon]).setIcon(droneArrowIcon(deg, color));
+      // 平滑模式：只更新朝向与目标位置，实际移动由 rAF 动画逐帧逼近
+      existing.setIcon(droneArrowIcon(deg, color));
+      moveTargets.set(sn, [lat, lon]);
       const tip = existing.getTooltip?.();
       if (tip) tip.setContent(tooltip);
     } else {
@@ -464,6 +470,7 @@ function applyDrones() {
       map.removeLayer(mk);
       droneMarkers.delete(sn);
       prevPos.delete(sn);
+      moveTargets.delete(sn);
       if (sn === selectedSn) {
         selectedSn = "";
         clearTrackLayer();
@@ -541,6 +548,31 @@ function startAutoFitPolls(): void {
   }, 120);
 }
 
+// 标记平滑移动动画（约 60fps 指数追近目标，消除 1Hz 推送的跳变）
+function startSmoothMotion(): void {
+  if (smoothRaf || !window.requestAnimationFrame) return;
+  lastSmoothAt = 0;
+  const tick = (t: number) => {
+    smoothRaf = window.requestAnimationFrame(tick);
+    if (!map) return;
+    const dt = lastSmoothAt ? Math.min(0.15, (t - lastSmoothAt) / 1000) : 0.05;
+    lastSmoothAt = t;
+    if (!moveTargets.size) return;
+    const k = 1 - Math.exp(-dt / 0.38);
+    for (const [sn, mk] of Array.from(droneMarkers.entries())) {
+      const tgt = moveTargets.get(sn);
+      if (!tgt) continue;
+      const cur = mk.getLatLng();
+      const lat = cur.lat + (tgt[0] - cur.lat) * k;
+      const lon = cur.lng + (tgt[1] - cur.lng) * k;
+      const arrived = Math.abs(lat - tgt[0]) < 1e-9 && Math.abs(lon - tgt[1]) < 1e-9;
+      mk.setLatLng(arrived ? tgt : [lat, lon]);
+      if (arrived) moveTargets.delete(sn);
+    }
+  };
+  smoothRaf = window.requestAnimationFrame(tick);
+}
+
 function initMap() {
   if (!mountEl.value || map) return;
   void loadLeaflet().then((lib) => {
@@ -565,6 +597,7 @@ function initMap() {
     applyDrones();
     startSizeWatcher();
     startAutoFitPolls();
+    startSmoothMotion();
   });
 }
 
@@ -587,6 +620,12 @@ onBeforeUnmount(() => {
     window.clearInterval(autoFitTimer);
     autoFitTimer = null;
   }
+  if (smoothRaf) {
+    window.cancelAnimationFrame(smoothRaf);
+    smoothRaf = 0;
+  }
+  moveTargets.clear();
+  lastSmoothAt = 0;
   droneMarkers.clear();
   prevPos.clear();
   trackLayer = null;
