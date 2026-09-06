@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { VBtn, VBtnGroup, VTable } from "vuetify/components";
 import { useLiveSocket, type DroneRow } from "../composables/useLiveSocket";
 import { useUiTheme } from "../composables/useUiTheme";
 import AppHeader from "../components/AppHeader.vue";
@@ -109,8 +110,20 @@ function logCls(row: unknown): string {
           <section class="panel log-panel">
             <div class="panel-hdr">
               <h2>
-                <button class="seg" :class="{ on: bottomMode === 'events' }" type="button" @click="bottomMode = 'events'">事件</button>
-                <button class="seg" :class="{ on: bottomMode === 'ap' }" type="button" @click="bottomMode = 'ap'">AP ({{ state.aps.length }})</button>
+                <VBtnGroup density="compact">
+                  <VBtn
+                    size="small"
+                    :variant="bottomMode === 'events' ? 'flat' : 'tonal'"
+                    :color="bottomMode === 'events' ? 'primary' : undefined"
+                    @click="bottomMode = 'events'"
+                  >事件</VBtn>
+                  <VBtn
+                    size="small"
+                    :variant="bottomMode === 'ap' ? 'flat' : 'tonal'"
+                    :color="bottomMode === 'ap' ? 'primary' : undefined"
+                    @click="bottomMode = 'ap'"
+                  >AP ({{ state.aps.length }})</VBtn>
+                </VBtnGroup>
               </h2>
               <span class="muted-note" v-if="bottomMode === 'events'">sniff: {{ sniffMsg }}</span>
             </div>
@@ -123,7 +136,7 @@ function logCls(row: unknown): string {
             </div>
 
             <div v-else class="ap-table">
-              <table>
+              <VTable density="compact">
                 <thead>
                   <tr>
                     <th>SSID</th>
@@ -144,10 +157,10 @@ function logCls(row: unknown): string {
                     <td>{{ text(a.last_seen || a.first_seen) }}</td>
                   </tr>
                   <tr v-if="!state.aps.length">
-                    <td colspan="6" class="empty-log ap-table-empty">暂无 AP 数据（无网卡采集时为正常状态）。</td>
+                    <td colspan="6" class="text-center text-medium-emphasis py-4">暂无 AP 数据（无网卡采集时为正常状态）。</td>
                   </tr>
                 </tbody>
-              </table>
+              </VTable>
             </div>
           </section>
         </div>
