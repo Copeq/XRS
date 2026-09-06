@@ -60,78 +60,80 @@ function logCls(row: unknown): string {
           <LiveMap :state="state" />
         </section>
 
-        <section class="panel list-panel">
-          <h2>实时无人机列表
-            <span class="count">{{ liveRows.length }}</span>
-          </h2>
-          <div class="live-cards">
-            <div v-for="d in liveRows" :key="d.sn" class="live-card" :data-sn="d.sn">
-              <div class="card-grid">
-                <span class="k">品牌+型号</span>
-                <span class="v brand">{{ text(d.model, "N/A") }}</span>
-                <span class="k">信号强度</span>
-                <span class="v" :class="rssiCls(d)">{{ d.rssi == null ? "-" : `${d.rssi} dBm` }}</span>
-                <span class="k">信号包数</span>
-                <span class="v">{{ text(d.pkts, "0") }}</span>
-                <span class="k">首次发现</span>
-                <span class="v">{{ text(d.first_seen) }}</span>
-                <span class="k">末次发现</span>
-                <span class="v">{{ text(d.last_seen) }}</span>
-                <span class="k">UAS ID</span>
-                <span class="v mono">{{ text(d.uas_id, "-") }}</span>
-                <span class="k">序列号</span>
-                <span class="v mono" :title="text(d.sn)">{{ text(d.sn) }}</span>
+        <div class="side-col">
+          <section class="panel list-panel">
+            <h2>实时无人机列表
+              <span class="count">{{ liveRows.length }}</span>
+            </h2>
+            <div class="live-cards">
+              <div v-for="d in liveRows" :key="d.sn" class="live-card" :data-sn="d.sn">
+                <div class="card-grid">
+                  <span class="k">品牌+型号</span>
+                  <span class="v brand">{{ text(d.model, "N/A") }}</span>
+                  <span class="k">信号强度</span>
+                  <span class="v" :class="rssiCls(d)">{{ d.rssi == null ? "-" : `${d.rssi} dBm` }}</span>
+                  <span class="k">信号包数</span>
+                  <span class="v">{{ text(d.pkts, "0") }}</span>
+                  <span class="k">首次发现</span>
+                  <span class="v">{{ text(d.first_seen) }}</span>
+                  <span class="k">末次发现</span>
+                  <span class="v">{{ text(d.last_seen) }}</span>
+                  <span class="k">UAS ID</span>
+                  <span class="v mono">{{ text(d.uas_id, "-") }}</span>
+                  <span class="k">序列号</span>
+                  <span class="v mono" :title="text(d.sn)">{{ text(d.sn) }}</span>
+                </div>
+              </div>
+              <div v-if="!liveRows.length" class="empty">暂无在线无人机（可在「更多 → 模拟目标」启动内存仿真验证）。</div>
+            </div>
+          </section>
+
+          <section class="panel log-panel">
+            <div class="panel-hdr">
+              <h2>
+                <button class="seg" :class="{ on: bottomMode === 'events' }" type="button" @click="bottomMode = 'events'">事件</button>
+                <button class="seg" :class="{ on: bottomMode === 'ap' }" type="button" @click="bottomMode = 'ap'">AP ({{ state.aps.length }})</button>
+              </h2>
+              <span class="muted-note" v-if="bottomMode === 'events'">sniff: {{ sniffMsg }}</span>
+            </div>
+
+            <div v-if="bottomMode === 'events'" class="logbox">
+              <div v-for="(row, i) in state.logs" :key="i" :class="logCls(row)">{{ logLine(row) }}</div>
+              <div v-if="!state.logs.length" class="ap empty-log">
+                暂无事件。WS：{{ state.connected ? "connected" : "connecting…" }}
               </div>
             </div>
-            <div v-if="!liveRows.length" class="empty">暂无在线无人机（可在「更多 → 模拟目标」启动内存仿真验证）。</div>
-          </div>
-        </section>
+
+            <div v-else class="ap-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>SSID</th>
+                    <th>BSSID</th>
+                    <th>厂商</th>
+                    <th>信道</th>
+                    <th>信号</th>
+                    <th>末次发现</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(a, i) in state.aps" :key="a.bssid || a.mac || i">
+                    <td>{{ text(a.ssid, "(隐藏)") }}</td>
+                    <td class="mono">{{ text(a.bssid || a.mac) }}</td>
+                    <td>{{ text(a.vendor) }}</td>
+                    <td>{{ text(a.ch) }}</td>
+                    <td>{{ a.rssi == null ? "-" : `${a.rssi} dBm` }}</td>
+                    <td>{{ text(a.last_seen || a.first_seen) }}</td>
+                  </tr>
+                  <tr v-if="!state.aps.length">
+                    <td colspan="6" class="empty-log ap-table-empty">暂无 AP 数据（无网卡采集时为正常状态）。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
       </div>
-
-      <section class="panel log-panel">
-        <div class="panel-hdr">
-          <h2>
-            <button class="seg" :class="{ on: bottomMode === 'events' }" type="button" @click="bottomMode = 'events'">事件</button>
-            <button class="seg" :class="{ on: bottomMode === 'ap' }" type="button" @click="bottomMode = 'ap'">AP ({{ state.aps.length }})</button>
-          </h2>
-          <span class="muted-note" v-if="bottomMode === 'events'">sniff: {{ sniffMsg }}</span>
-        </div>
-
-        <div v-if="bottomMode === 'events'" class="logbox">
-          <div v-for="(row, i) in state.logs" :key="i" :class="logCls(row)">{{ logLine(row) }}</div>
-          <div v-if="!state.logs.length" class="ap empty-log">
-            暂无事件。WS：{{ state.connected ? "connected" : "connecting…" }}
-          </div>
-        </div>
-
-        <div v-else class="ap-table">
-          <table>
-            <thead>
-              <tr>
-                <th>SSID</th>
-                <th>BSSID</th>
-                <th>厂商</th>
-                <th>信道</th>
-                <th>信号</th>
-                <th>末次发现</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(a, i) in state.aps" :key="a.bssid || a.mac || i">
-                <td>{{ text(a.ssid, "(隐藏)") }}</td>
-                <td class="mono">{{ text(a.bssid || a.mac) }}</td>
-                <td>{{ text(a.vendor) }}</td>
-                <td>{{ text(a.ch) }}</td>
-                <td>{{ a.rssi == null ? "-" : `${a.rssi} dBm` }}</td>
-                <td>{{ text(a.last_seen || a.first_seen) }}</td>
-              </tr>
-              <tr v-if="!state.aps.length">
-                <td colspan="6" class="empty-log ap-table-empty">暂无 AP 数据（无网卡采集时为正常状态）。</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
     </template>
 
     <HistoryView v-else :rows="state.drones" />
@@ -148,14 +150,37 @@ function logCls(row: unknown): string {
 .main-grid {
   display: grid;
   grid-template-columns: minmax(320px, 1.2fr) minmax(340px, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
   padding: 12px 14px;
   flex: 1;
+  min-height: 0;
+  align-items: stretch;
+}
+
+/* 右侧纵列：无人机列表在上、事件/AP 在下，宽度与列表一致 */
+.side-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.side-col .list-panel {
+  flex: 1 1 auto;
+  min-height: 180px;
+}
+
+.side-col .log-panel {
+  flex: 0 1 auto;
+  min-height: 170px;
 }
 
 @media (max-width: 900px) {
   .main-grid {
     grid-template-columns: 1fr;
+    grid-template-rows: none;
   }
 }
 
@@ -265,8 +290,12 @@ function logCls(row: unknown): string {
 }
 
 .log-panel {
-  margin: 0 14px 12px;
-  min-height: 160px;
+  margin: 0;
+  min-height: 170px;
+}
+
+.log-panel .panel-hdr {
+  flex-wrap: wrap;
 }
 
 .log-panel .muted-note {
@@ -274,6 +303,9 @@ function logCls(row: unknown): string {
   font-weight: 400;
   font-size: 11px;
   margin-left: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .logbox {
@@ -283,6 +315,13 @@ function logCls(row: unknown): string {
   font-family: var(--mono);
   font-size: 12px;
   max-height: 220px;
+}
+
+/* 底部长文本允许自动换行，避免被右列宽度截断 */
+.logbox div {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .logbox .rid {
@@ -346,7 +385,9 @@ function logCls(row: unknown): string {
 .ap-table td {
   padding: 4px 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .ap-table-empty {

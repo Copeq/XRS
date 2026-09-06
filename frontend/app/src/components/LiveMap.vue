@@ -38,6 +38,9 @@ let selLastPt: [number, number] | null = null;
 
 let riskHintEl: HTMLDivElement | null = null;
 let selectSeq = 0;
+let sizeObserver: ResizeObserver | null = null;
+let autoFitTimer: number | null = null;
+let fallbackBaseView = false;
 
 const META = (): Record<string, unknown> => (props.state.meta ?? {}) as Record<string, unknown>;
 const DEFAULT_URL = "https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}";
@@ -384,7 +387,6 @@ function applyDrones() {
   if (!map) return;
   const rows = props.state.drones ?? [];
   const seen = new Set<string>();
-  const hasPos = rows.some((d) => Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lon)));
   for (const d of rows) {
     const sn = String(d.sn ?? "");
     const lat = Number(d.lat);
@@ -423,18 +425,72 @@ function applyDrones() {
   }
   // 被选中的目标持续续画轨迹
   updateSelectedLive();
-  if (!fittedOnce) {
-    if (hasPos) {
-      const pts: Array<[number, number]> = [];
-      for (const d of rows) {
-        const la = Number(d.lat);
-        const lo = Number(d.lon);
-        if (Number.isFinite(la) && Number.isFinite(lo)) pts.push([la, lo]);
-      }
-      if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [40, 40] });
-      fittedOnce = true;
-    }
+  // 首次打开自动缩放（容器就绪且确有实时目标时才真正 fit）
+  if (!fittedOnce) attemptAutoFit();
+}
+
+function containerReady(): boolean {
+  const el = mountEl.value;
+  return !!el && el.clientWidth > 0 && el.clientHeight > 0;
+}
+
+// 首次打开自动缩放到当前实时目标（要求容器已就绪；成功一次后置位避免后续跳动）
+function attemptAutoFit(): boolean {
+  if (!map || fittedOnce || !containerReady()) return false;
+  const pts: Array<[number, number]> = [];
+  for (const d of props.state.drones ?? []) {
+    const la = Number(d.lat);
+    const lo = Number(d.lon);
+    if (Number.isFinite(la) && Number.isFinite(lo) && la !== 0 && lo !== 0) pts.push([la, lo]);
   }
+  if (!pts.length) return false;
+  map.invalidateSize(false);
+  map.fitBounds(L.latLngBounds(pts), { padding: [44, 44] });
+  fittedOnce = true;
+  return true;
+}
+
+// meta 晚于地图创建到达时的补偿：从兜底视图回正到配置的基站位置
+function ensureBaseViewOnce(): void {
+  if (!map || fittedOnce || !fallbackBaseView) return;
+  const m = META();
+  const lat = Number(m.base_lat);
+  const lon = Number(m.base_lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  fallbackBaseView = false;
+  const zoom = Number(m.base_zoom ?? 13);
+  map.invalidateSize(false);
+  map.setView([lat, lon], Number.isFinite(zoom) ? zoom : 13);
+}
+
+function startSizeWatcher(): void {
+  if (sizeObserver || !mountEl.value || typeof ResizeObserver === "undefined") return;
+  sizeObserver = new ResizeObserver(() => {
+    if (!map) return;
+    map.invalidateSize(false);
+    if (!fittedOnce) {
+      ensureBaseViewOnce();
+      attemptAutoFit();
+    }
+  });
+  sizeObserver.observe(mountEl.value);
+}
+
+function startAutoFitPolls(): void {
+  if (autoFitTimer) return;
+  let tries = 0;
+  autoFitTimer = window.setInterval(() => {
+    tries += 1;
+    if (map && containerReady()) map.invalidateSize(false);
+    if (!fittedOnce) {
+      ensureBaseViewOnce();
+      if (attemptAutoFit()) tries = 999;
+    }
+    if (!map || tries >= 10 || fittedOnce) {
+      if (autoFitTimer) window.clearInterval(autoFitTimer);
+      autoFitTimer = null;
+    }
+  }, 120);
 }
 
 function initMap() {
@@ -449,17 +505,18 @@ function initMap() {
     const lon = Number(meta.base_lon);
     const zoom = Number(meta.base_zoom ?? 13);
     if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      fallbackBaseView = false;
       map.setView([lat, lon], Number.isFinite(zoom) ? zoom : 13);
     } else {
+      fallbackBaseView = true;
       map.setView([30, 114], 5);
     }
     applyBaseMarker();
     applyZones();
     syncRiskHint();
     applyDrones();
-    window.setTimeout(() => {
-      if (map) map.invalidateSize(false);
-    }, 60);
+    startSizeWatcher();
+    startAutoFitPolls();
   });
 }
 
@@ -474,6 +531,14 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", resize);
+  if (sizeObserver) {
+    sizeObserver.disconnect();
+    sizeObserver = null;
+  }
+  if (autoFitTimer) {
+    window.clearInterval(autoFitTimer);
+    autoFitTimer = null;
+  }
   droneMarkers.clear();
   prevPos.clear();
   trackLayer = null;
@@ -493,6 +558,7 @@ watch(
   () => props.state.meta,
   () => {
     if (!map) return;
+    ensureBaseViewOnce();
     applyTileLayer();
     applyBaseMarker();
     applyZones();
