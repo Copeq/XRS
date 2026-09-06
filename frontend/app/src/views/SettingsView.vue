@@ -9,6 +9,7 @@ import {
   VSelect,
   VSnackbar,
   VSwitch,
+  VTextarea,
   VTextField,
 } from "vuetify/components";
 import { pageFetch, postJson } from "../composables/pageApi";
@@ -300,6 +301,7 @@ async function load() {
       // no preferred binding yet: leave empty so the save warns user to bind NIC
     }
     applyVisual((view as Dict).visual as Dict);
+    await loadRawTree();
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -605,6 +607,96 @@ async function maintenance(op: "reidentify" | "systemd" | "iw" | "security" | "m
   }
 }
 
+/* ------- Raw 配置文件 ------- */
+const rawFiles = ref<Array<{ title: string; path: string }>>([]);
+const rawPath = ref("");
+const rawText = ref("");
+const rawBusy = ref(false);
+
+function flattenRaw(nodes: Array<Dict>, out: Array<{ title: string; path: string }>, base = "") {
+  for (const node of nodes) {
+    const rel = text(node.rel_path ?? node.name ?? "", "");
+    const full = rel ? (base ? `${base}/${rel}` : rel) : rel;
+    if (String(node.type) === "dir") {
+      flattenRaw(Array.isArray(node.children) ? (node.children as Array<Dict>) : [], out, full || base);
+    } else {
+      out.push({ title: full || text(node.path, ""), path: text(node.path, full) });
+    }
+  }
+}
+
+async function loadRawTree() {
+  try {
+    const d = (await pageFetch("/api/config/tree")) as Dict;
+    const arr: Array<{ title: string; path: string }> = [];
+    flattenRaw(Array.isArray(d.tree) ? (d.tree as Array<Dict>) : [], arr);
+    rawFiles.value = arr.sort((a, b) => a.title.localeCompare(b.title));
+  } catch (e) {
+    notify(`无法读取配置目录：${e instanceof Error ? e.message : String(e)}`, true);
+  }
+}
+
+async function openRaw(path: string) {
+  if (!path) return;
+  rawBusy.value = true;
+  rawText.value = "";
+  try {
+    const d = (await pageFetch(`/api/config/file?path=${encodeURIComponent(path)}`)) as Dict;
+    if (d.ok === false) {
+      notify(text(d.error, "读取失败"), true);
+      return;
+    }
+    rawPath.value = path;
+    rawText.value = String(d.text ?? "");
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  } finally {
+    rawBusy.value = false;
+  }
+}
+
+async function saveRaw() {
+  if (!rawPath.value) {
+    notify("请先选择配置文件", true);
+    return;
+  }
+  rawBusy.value = true;
+  try {
+    const r = (await postJson("/api/settings/raw/save", { path: rawPath.value, text: rawText.value })) as Dict;
+    if (r.ok === false) {
+      notify(text(r.error, "保存失败"), true);
+      return;
+    }
+    notify("Raw 配置已保存", false);
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  } finally {
+    rawBusy.value = false;
+  }
+}
+
+async function deleteRaw() {
+  if (!rawPath.value) return;
+  const ok = window.confirm(`确定删除配置文件 ${rawPath.value}？`);
+  if (!ok) return;
+  rawBusy.value = true;
+  try {
+    const r = (await postJson("/api/config/file/delete", { path: rawPath.value })) as Dict;
+    if (r.ok === false) {
+      notify(text(r.error, "删除失败"), true);
+      return;
+    }
+    notify("文件已删除", false);
+    rawPath.value = "";
+    rawText.value = "";
+    await loadRawTree();
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  } finally {
+    rawBusy.value = false;
+  }
+}
+
 function openAdvanced() {
   window.open("/settings?standalone=1", "_blank", "noopener,noreferrer");
 }
@@ -879,6 +971,41 @@ onMounted(() => {
             <VTextField v-model="hook.key" label="Webhook Key（留空保持现有密钥）" density="compact" variant="outlined" hide-details />
           </div>
           <VBtn size="small" variant="outlined" color="primary" @click="addHook">添加通道</VBtn>
+        </section>
+
+        <!-- Raw 配置文件 -->
+        <section class="st-card st-wide">
+          <h2>Raw 配置文件</h2>
+          <div class="d-flex ga-2 mb-3">
+            <VSelect
+              v-model="rawPath"
+              label="选择配置文件"
+              :items="rawFiles"
+              item-title="title"
+              item-value="path"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="flex-grow-1"
+              @update:model-value="openRaw(String($event || ''))"
+            />
+            <VBtn size="small" variant="tonal" :loading="rawBusy" @click="loadRawTree">刷新文件</VBtn>
+          </div>
+          <VTextarea
+            v-model="rawText"
+            label="文件内容（JSON/配置文本）"
+            variant="outlined"
+            auto-grow
+            rows="12"
+            class="raw-editor"
+            :disabled="!rawPath"
+          />
+          <div class="d-flex ga-2 mt-3">
+            <VChip variant="tonal" label>修改前建议先“导出设置”备份</VChip>
+            <div class="flex-spacer" />
+            <VBtn size="small" color="error" variant="tonal" :disabled="!rawPath" :loading="rawBusy" @click="deleteRaw">删除文件</VBtn>
+            <VBtn size="small" color="primary" :disabled="!rawPath" :loading="rawBusy" @click="saveRaw">保存</VBtn>
+          </div>
         </section>
 
         <!-- 数据与维护 -->
