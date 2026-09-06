@@ -295,7 +295,6 @@ async function simStop() {
         <div class="more-wrap">
           <button class="chip-btn" type="button" @click="toggleMore">更多</button>
           <div v-if="moreOpen" class="more-pop">
-            <button type="button" @click="goSettings">设置</button>
             <button type="button" @click="openSim">模拟目标</button>
             <button type="button" @click="navTo('/logs')">日志</button>
             <button type="button" @click="goHardware">硬件助手</button>
@@ -319,6 +318,7 @@ async function simStop() {
       <button class="app-tab-btn" :class="{ active: page === 'live' }" type="button" @click="emit('set-page', 'live')">实时</button>
       <button class="app-tab-btn" :class="{ active: page === 'history' }" type="button" @click="emit('set-page', 'history')">历史记录</button>
       <button class="app-tab-btn" :class="{ active: page === 'hardware' }" type="button" @click="emit('set-page', 'hardware')">硬件助手</button>
+      <button class="app-tab-btn" :class="{ active: page === 'settings' }" type="button" @click="emit('set-page', 'settings')">设置</button>
     </nav>
 
     <!-- 模拟目标弹窗 -->
