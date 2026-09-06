@@ -287,6 +287,20 @@ function applyVisual(visual: Dict) {
   form.metrics_enabled = !!mc.enabled;
   form.metrics_retention = num(mc.retention_days ?? 7, 7);
   form.metrics_temp = text(mc.temperature_source, "auto");
+  /* 程序更新 */
+  const au = (visual.app_update ?? {}) as Dict;
+  auEnabled.value = (au.enabled as boolean | undefined) !== false;
+  auForce.value = !!au.force_update;
+  auMirror.value = text(au.mirror, "github") || "github";
+  auCustomMirror.value = text(au.custom_mirror, "");
+  const auStateRaw = ((au.state as Dict) ?? {}) as Dict;
+  auState.value = auStateRaw;
+  const opts = Array.isArray((au as Dict).mirror_options)
+    ? ((au as Dict).mirror_options as Array<Dict>)
+    : Array.isArray(auStateRaw.mirror_options)
+      ? (auStateRaw.mirror_options as Array<Dict>)
+      : [];
+  auMirrorOptions.value = opts;
 }
 
 async function load() {
@@ -555,6 +569,12 @@ function buildVisualPayload(): Dict {
     enabled: form.model_enabled,
     url: text(form.model_url, ""),
   };
+  const appUpdatePayload: Dict = {
+    enabled: auEnabled.value,
+    force_update: auForce.value,
+    mirror: text(auMirror.value, "github") || "github",
+    custom_mirror: auMirror.value === "custom" ? text(auCustomMirror.value, "") : "",
+  };
   return {
     basic,
     web,
@@ -563,6 +583,7 @@ function buildVisualPayload(): Dict {
     auth: authPayload,
     metrics: metricsPayload,
     model_update: modelPayload,
+    app_update: appUpdatePayload,
     network_bindings: collectNetworkBindings(),
   };
 }
@@ -1037,7 +1058,241 @@ function saveNewFwParse() {
   notify("页面偏好已保存到当前浏览器", false);
 }
 
-/* ------- 维护工具 ------- */
+/* ------- 程序更新 ------- */
+const auEnabled = ref(true);
+const auForce = ref(false);
+const auMirror = ref("github");
+const auCustomMirror = ref("");
+const auState = ref<Dict>({});
+const auMirrorOptions = ref<Array<Dict>>([]);
+const auFileInput = ref<HTMLInputElement | null>(null);
+const auFile = ref<File | null>(null);
+const auPrep = ref<Dict>({});
+const auUploading = ref(false);
+const auBusy = computed(() => !!(auState.value.running || auState.value.download_running || auState.value.installing));
+const auStaged = computed(() => !!auState.value.staged_ready);
+const auHasUpdate = computed(() => !!auState.value.update_available);
+const auSupported = computed(() => auState.value.install_supported !== false);
+const auSudoBlocked = computed(() => !!(auState.value.requires_sudo && auState.value.can_elevate === false));
+
+function formatBytesUi(bytes: unknown): string {
+  let n = Number(bytes ?? 0);
+  if (!Number.isFinite(n) || n < 0) return "-";
+  const units = ["B", "KB", "MB", "GB"];
+  let idx = 0;
+  while (n >= 1024 && idx < units.length - 1) {
+    n /= 1024;
+    idx += 1;
+  }
+  return `${n.toFixed(n >= 100 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+const AU_DEFAULT_MIRRORS: Array<{ key: string; label: string }> = [
+  { key: "github", label: "GitHub 官方" },
+  { key: "gh-proxy", label: "gh-proxy.org" },
+  { key: "custom", label: "自定义镜像" },
+];
+
+function auMirrorItems(): Array<{ title: string; value: string }> {
+  const list = auMirrorOptions.value.length ? auMirrorOptions.value : AU_DEFAULT_MIRRORS;
+  return (list as Array<Dict>).map((o) => ({ title: text(o.label, text(o.key, "")), value: text(o.key, "") }));
+}
+
+async function loadAuState() {
+  try {
+    const d = (await pageFetch("/api/settings/view")) as Dict;
+    const au = (((d.visual as Dict) ?? {}) as Dict).app_update as Dict | undefined;
+    if (!au) return;
+    auState.value = ((au.state as Dict) ?? {}) as Dict;
+    const opts = Array.isArray((au as Dict).mirror_options)
+      ? ((au as Dict).mirror_options as Array<Dict>)
+      : Array.isArray(auState.value.mirror_options)
+        ? (auState.value.mirror_options as Array<Dict>)
+        : [];
+    auMirrorOptions.value = opts;
+  } catch (_e) {
+    /* ignore */
+  }
+}
+
+const auStateText = computed(() => {
+  const s = auState.value;
+  const currentTag = text(s.current_tag, "");
+  const latestTag = text(s.latest_tag, "");
+  const staged = text(s.staged_asset_name ?? s.asset_name, "安装包");
+  const percent = Number(s.download_percent ?? 0);
+  const lines: string[] = [];
+  lines.push(`当前版本 ${currentTag || "-"}${latestTag ? ` | 检查到最新 ${latestTag}` : ""}`);
+  if (s.running) {
+    lines.push("任务进行中…");
+  } else if (s.download_running) {
+    lines.push(`后台下载中: ${staged}${percent > 0 ? ` ${percent.toFixed(percent >= 10 ? 0 : 1)}%` : ""}`);
+    if (Number(s.download_total_bytes ?? 0) > 0) {
+      lines.push(`进度: ${formatBytesUi(s.downloaded_bytes)} / ${formatBytesUi(s.download_total_bytes)}`);
+    }
+  } else if (s.installing) {
+    lines.push(`更新状态: ${text(s.install_message ?? s.install_status, "进行中")}`);
+  } else if (s.staged_ready) {
+    lines.push(`安装包已就绪: ${staged}`);
+    if (text(s.staged_source, "")) lines.push(`来源: ${text(s.staged_source, "")}`);
+    if (text(s.staged_sha256 ?? s.sha256, "")) lines.push(`SHA256: ${text(s.staged_sha256 ?? s.sha256, "").slice(0, 12)}…`);
+  } else if (text(s.last_error, "")) {
+    lines.push(`检查/更新失败: ${text(s.last_error, "")}`);
+  } else if (s.checked) {
+    lines.push(s.update_available ? "发现新版本，下载或上传安装包后即可安装。" : "当前已是检查到的最新版本。");
+  } else {
+    lines.push("启用后自动检查 GitHub Release；下载、上传和安装都需要手动确认。");
+  }
+  if (s.install_supported === false && text(s.support_reason, "")) lines.push(`当前环境: ${text(s.support_reason, "")}`);
+  if (text(s.mirror, "") && text(s.mirror, "") !== "github") lines.push(`镜像: ${text(s.mirror_url ?? s.mirror, "")}`);
+  if (s.force_update) lines.push("强制更新: 已启用，校验失败的安装包也可继续安装。");
+  if (s.staged_ready && s.staged_verified === false) lines.push("安装包校验: 未通过或缺少 SHA256，继续安装属于强制更新。");
+  if (s.staged_ready && s.requires_sudo) {
+    if (s.can_elevate === false) lines.push(String(s.sudo_blocked_reason ?? "当前服务进程无法 sudo 提权，请通过 SSH/root 执行安装。"));
+    else lines.push("安装时会按需询问 sudo 密码。");
+  }
+  return lines.join("\n");
+});
+
+async function checkAppUpdateNow() {
+  toolBusy.value = "au-check";
+  try {
+    const d = (await postJson("/api/settings/app-update/check", {})) as Dict;
+    if (d.ok === false) {
+      notify(text(d.error, "版本检查失败"), true);
+      return;
+    }
+    auState.value = ((d.state as Dict) ?? {}) as Dict;
+    notify((auState.value.update_available as boolean) ? "发现新版本，请手动更新" : "版本检查完成", false);
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  } finally {
+    toolBusy.value = "";
+  }
+}
+
+async function downloadAppUpdateNow() {
+  toolBusy.value = "au-download";
+  try {
+    const d = (await postJson("/api/settings/app-update/download", {})) as Dict;
+    if (d.ok === false) {
+      notify(text(d.error, "启动下载失败"), true);
+      return;
+    }
+    auState.value = ((d.state as Dict) ?? {}) as Dict;
+    notify(text(d.message, "安装包后台下载已开始"), false);
+    void pollAuState();
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  } finally {
+    toolBusy.value = "";
+  }
+}
+
+async function pollAuState() {
+  for (let i = 0; i < 30; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    await loadAuState().catch(() => {});
+    if (!auBusy.value) break;
+  }
+}
+
+async function startAppUpdateNow() {
+  const s = auState.value;
+  if (!s.staged_ready) {
+    notify("请先下载或上传安装包，并等待 SHA256 校验通过", true);
+    return;
+  }
+  const target = text(s.staged_asset_name ?? s.asset_name, "安装包");
+  if (!window.confirm(`将安装已通过 SHA256 校验的安装包：${target}。更新期间服务会短暂重启，是否继续？`)) return;
+  toolBusy.value = "au-start";
+  try {
+    const d = (await postJson("/api/settings/app-update/start", { confirm: true })) as Dict;
+    if (d.ok === false) {
+      notify(text(d.error, "安装失败"), true);
+      return;
+    }
+    auState.value = Object.assign({}, auState.value, { installing: true, install_status: "preparing" }, (d.state as Dict) ?? {});
+    notify(text(d.message, "更新进程已启动，服务将短暂重启"), false);
+    void pollAuState();
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  } finally {
+    toolBusy.value = "";
+  }
+}
+
+function triggerAuUpload() {
+  if (auFileInput.value) auFileInput.value.click();
+}
+
+async function onAuFileChange(ev: Event) {
+  const input = ev.target as HTMLInputElement;
+  const f = input.files?.[0] ?? null;
+  auFile.value = f;
+  auPrep.value = {};
+  if (!f) return;
+  const maxBytes = Number(auState.value.max_upload_bytes ?? 0);
+  if (maxBytes > 0 && f.size > maxBytes) {
+    notify(`安装包过大，当前上限为 ${formatBytesUi(maxBytes)}`, true);
+    if (input) input.value = "";
+    auFile.value = null;
+    return;
+  }
+  auUploading.value = true;
+  try {
+    const d = (await postJson("/api/settings/app-update/upload/prepare", { file_name: String(f.name || "package.bin"), file_size: Number(f.size || 0) })) as Dict;
+    if (d.ok === false) {
+      notify(text(d.error, "预检查失败"), true);
+      return;
+    }
+    auPrep.value = ((d.prepare as Dict) ?? {}) as Dict;
+    if (d.state) auState.value = (d.state as Dict) ?? auState.value;
+    notify(`预检查完成：匹配资产 ${text(auPrep.value.asset_name, "-")}`, false);
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  } finally {
+    auUploading.value = false;
+  }
+}
+
+async function confirmAuUpload() {
+  const f = auFile.value;
+  const token = text(auPrep.value.token, "");
+  if (!f || !token) {
+    notify("请先选择文件并完成预检查", true);
+    return;
+  }
+  auUploading.value = true;
+  try {
+    const headers = new Headers();
+    headers.set("X-XRS-Page", "1");
+    headers.set("Content-Type", "application/octet-stream");
+    headers.set("X-XRS-Upload-Name", encodeURIComponent(String(f.name || "package.bin")));
+    headers.set("X-XRS-Upload-Token", token);
+    const r = await fetch("/api/settings/app-update/upload", { method: "POST", headers, body: f, cache: "no-store" });
+    const txt = await r.text();
+    let d: Dict = {};
+    try {
+      d = JSON.parse(txt) as Dict;
+    } catch (_e) {
+      d = { error: txt || `HTTP ${r.status}` };
+    }
+    if (!r.ok || d.ok === false) {
+      throw new Error(text(d.error, `HTTP ${r.status}`));
+    }
+    auState.value = ((d.state as Dict) ?? auState.value) as Dict;
+    notify(text(d.message, "安装包已上传并通过校验"), false);
+    if (auFileInput.value) auFileInput.value.value = "";
+    auFile.value = null;
+    auPrep.value = {};
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  } finally {
+    auUploading.value = false;
+  }
+}
+
 async function maintenance(op: "reidentify" | "systemd" | "iw" | "security" | "models") {
   if (op === "reidentify") {
     const ok = window.confirm("对最近记录重新执行机型/SN 识别？");
@@ -1724,6 +1979,55 @@ onMounted(() => {
           <VBtn size="small" variant="outlined" color="primary" @click="addHook">添加通道</VBtn>
         </section>
 
+        <!-- 程序更新 -->
+        <section class="st-card st-wide">
+          <h2>程序更新</h2>
+          <div class="d-flex flex-wrap ga-2 align-center mb-2">
+            <VSwitch v-model="auEnabled" label="自动检查版本" color="primary" hide-details />
+            <VSwitch v-model="auForce" label="强制更新" color="primary" hide-details />
+            <VSelect
+              v-model="auMirror"
+              label="下载镜像"
+              :items="auMirrorItems()"
+              density="compact"
+              variant="outlined"
+              hide-details
+              style="max-width: 220px"
+            />
+            <VTextField
+              v-if="auMirror === 'custom'"
+              v-model="auCustomMirror"
+              label="自定义镜像源"
+              placeholder="例如 https://gh-proxy.example.com/{url}"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="flex-grow-1"
+              style="min-width: 260px"
+            />
+          </div>
+          <div class="muted-note mb-2">镜像与开关随“保存设置”生效；默认直接访问 github.com，强制更新允许校验失败的安装包继续安装。</div>
+          <pre v-if="auStateText" class="log-box mb-2">{{ auStateText }}</pre>
+          <div class="d-flex flex-wrap ga-2 mb-2">
+            <VBtn size="small" variant="outlined" :disabled="auBusy" :loading="toolBusy === 'au-check'" @click="checkAppUpdateNow">检查</VBtn>
+            <VBtn size="small" variant="outlined" :disabled="auBusy || !auHasUpdate || !auSupported" :loading="toolBusy === 'au-download'" @click="downloadAppUpdateNow">下载</VBtn>
+            <VBtn size="small" variant="tonal" :disabled="auBusy" @click="triggerAuUpload">选择安装包上传…</VBtn>
+            <VBtn size="small" color="primary" :disabled="auBusy || !auStaged || !auSupported || auSudoBlocked" :loading="toolBusy === 'au-start'" @click="startAppUpdateNow">安装</VBtn>
+            <input ref="auFileInput" type="file" accept=".bin,application/octet-stream" style="display: none" @change="onAuFileChange" />
+          </div>
+          <div v-if="auFile || Object.keys(auPrep).length" class="upload-box">
+            <div class="d-flex align-center ga-2 mb-1">
+              <VChip v-if="auFile" variant="tonal" label class="mono">{{ auFile.name }} · {{ formatBytesUi(auFile.size) }}</VChip>
+              <span v-if="Object.keys(auPrep).length" class="muted-note">
+                匹配资产 {{ text(auPrep.asset_name, "-") }}<template v-if="text(auPrep.latest_tag, '')"> | Release {{ text(auPrep.latest_tag, "") }}</template><template v-if="text(auPrep.expected_sha256, '')"> | SHA256 {{ text(auPrep.expected_sha256, "").slice(0, 16) }}…</template>
+              </span>
+              <div class="flex-spacer" />
+              <VBtn size="small" color="primary" variant="tonal" :disabled="!auFile || !text(auPrep.token, '') || auBusy" :loading="auUploading" @click="confirmAuUpload">上传并校验 SHA256</VBtn>
+            </div>
+            <div class="muted-note">先选择文件自动完成架构匹配与 SHA256 预检，再点击上传；安装前需等待校验通过。</div>
+          </div>
+        </section>
+
         <!-- Raw 配置文件 -->
         <section class="st-card st-wide">
           <h2>Raw 配置文件</h2>
@@ -2023,6 +2327,13 @@ onMounted(() => {
   background:
     linear-gradient(color-mix(in srgb, var(--border) 34%, transparent) 1px, transparent 1px) 0 0 / 100% 25%,
     linear-gradient(color-mix(in srgb, var(--border) 18%, transparent) 1px, transparent 1px) 0 0 / 25% 100%;
+}
+
+.upload-box {
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px dashed color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 8px;
 }
 
 .log-box {
