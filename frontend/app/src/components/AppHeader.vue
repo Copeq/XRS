@@ -9,11 +9,6 @@ const emit = defineEmits<{ (e: "set-page", p: "live" | "history" | "hardware" | 
 type MetaRecord = Record<string, unknown>;
 
 const meta = computed<MetaRecord>(() => (props.state.meta ?? {}) as MetaRecord);
-const sec = computed<MetaRecord>(() => {
-  const s = meta.value.runtime_security;
-  return s && typeof s === "object" ? (s as MetaRecord) : {};
-});
-const runningAsRoot = computed<boolean>(() => Boolean(sec.value.running_as_root));
 
 function sniffKind(): "ok" | "paused" | "error" | "warn" {
   const state = String(meta.value.sniff_state ?? "warn");
@@ -42,28 +37,11 @@ const liveCount = computed(() => props.state.drones.filter((d) => !d.lost && !d.
 const lostCount = computed(() => props.state.drones.filter((d) => d.lost && !d.archived).length);
 const totalCount = computed(() => props.state.drones.length);
 
-const secBannerVisible = computed(
-  () => runningAsRoot.value && !secIgnored.value,
-);
-const secIgnored = ref(false);
-function ignoreSecBanner() {
-  secIgnored.value = true;
-  try {
-    window.localStorage.setItem("lr_sec_banner_ignored", "1");
-  } catch (_e) {
-    /* noop */
-  }
-}
 function onOpenSimulation() {
   void openSim();
 }
 
 onMounted(() => {
-  try {
-    secIgnored.value = window.localStorage.getItem("lr_sec_banner_ignored") === "1";
-  } catch (_e) {
-    secIgnored.value = false;
-  }
   window.addEventListener("xrs:open-simulation", onOpenSimulation);
 });
 
@@ -303,11 +281,6 @@ async function simStop() {
     </div>
 
     <div class="banner-stack">
-      <div v-if="secBannerVisible" class="banner warn security-banner">
-        <span>当前运行权限过高，建议在设置中修复。</span>
-        <button type="button" class="banner-btn" @click="navTo('/settings')">去设置修复</button>
-        <button type="button" class="banner-close" aria-label="忽略" title="忽略" @click="ignoreSecBanner">×</button>
-      </div>
       <div v-if="sniffBannerText" class="banner" :class="sniffKind() === 'error' ? 'err' : 'warn'">
         {{ sniffBannerText }}
       </div>
@@ -604,16 +577,6 @@ async function simStop() {
 .banner.err {
   background: color-mix(in srgb, #d1242f 12%, var(--card));
   border: 1px solid color-mix(in srgb, #d1242f 45%, var(--border));
-}
-
-.banner-btn {
-  border: 1px solid var(--blue);
-  background: transparent;
-  color: var(--blue);
-  border-radius: 6px;
-  padding: 4px 10px;
-  cursor: pointer;
-  font-size: 12px;
 }
 
 .banner-close {
