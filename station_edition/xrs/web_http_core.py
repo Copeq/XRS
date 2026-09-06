@@ -469,6 +469,17 @@ def http_server_thread() -> None:
                 self.wfile.write(body)
                 return True
             if path in ("/settings", "/settings.html"):
+                # Vue 壳模式下 /settings 由 SPA 提供（Settings 页内用
+                # ?standalone=1 的隔离 iframe 嵌入原设置页）；legacy 模式照旧。
+                standalone_req = any(
+                    str(value).strip().lower() in ("1", "true", "yes", "on")
+                    for value in (query.get("standalone") or [])
+                )
+                if _vue_frontend_enabled() and not standalone_req:
+                    frontend_index = _frontend_index_path()
+                    if frontend_index is not None:
+                        self._send_html_file(frontend_index)
+                        return True
                 body = _build_settings_html().encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")

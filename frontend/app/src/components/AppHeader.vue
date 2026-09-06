@@ -3,8 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { postJson, pageFetch } from "../composables/pageApi";
 import type { HomeState } from "../composables/useLiveSocket";
 
-const props = defineProps<{ state: HomeState; page: "live" | "history" | "hardware" }>();
-const emit = defineEmits<{ (e: "set-page", p: "live" | "history" | "hardware"): void }>();
+const props = defineProps<{ state: HomeState; page: "live" | "history" | "hardware" | "settings" }>();
+const emit = defineEmits<{ (e: "set-page", p: "live" | "history" | "hardware" | "settings"): void }>();
 
 type MetaRecord = Record<string, unknown>;
 
@@ -93,6 +93,11 @@ function navTo(href: string) {
 function goHardware() {
   moreOpen.value = false;
   emit("set-page", "hardware");
+}
+
+function goSettings() {
+  moreOpen.value = false;
+  emit("set-page", "settings");
 }
 
 /* 通知中心 */
@@ -290,7 +295,7 @@ async function simStop() {
         <div class="more-wrap">
           <button class="chip-btn" type="button" @click="toggleMore">更多</button>
           <div v-if="moreOpen" class="more-pop">
-            <button type="button" @click="navTo('/settings')">设置</button>
+            <button type="button" @click="goSettings">设置</button>
             <button type="button" @click="openSim">模拟目标</button>
             <button type="button" @click="navTo('/logs')">日志</button>
             <button type="button" @click="goHardware">硬件助手</button>
