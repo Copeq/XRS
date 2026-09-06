@@ -14,6 +14,22 @@ import { pageFetch, postJson } from "../composables/pageApi";
 
 type Dict = Record<string, unknown>;
 
+interface ZoneForm {
+  enabled: boolean;
+  name: string;
+  lat1: string;
+  lon1: string;
+  lat2: string;
+  lon2: string;
+}
+
+interface HookForm {
+  index: number;
+  name: string;
+  enabled: boolean;
+  key: string;
+}
+
 interface FormState {
   iface: string;
   base_name: string;
@@ -29,6 +45,18 @@ interface FormState {
   channel: number;
   lost_timeout: number;
   min_gap: number;
+  /* Web 访问控制 */
+  access_enabled: boolean;
+  access_mode: string;
+  access_list: string[];
+  /* 报警区域 */
+  alarm_zones: ZoneForm[];
+  /* 通知 */
+  notify_enabled: boolean;
+  notify_reonline: boolean;
+  reonline_cooldown_sec: number;
+  send_timeout_sec: number;
+  hooks: HookForm[];
 }
 
 const loading = ref(true);
@@ -54,6 +82,15 @@ const form = reactive<FormState>({
   channel: 6,
   lost_timeout: 15,
   min_gap: 0.5,
+  access_enabled: false,
+  access_mode: "allow",
+  access_list: [] as string[],
+  alarm_zones: [] as ZoneForm[],
+  notify_enabled: false,
+  notify_reonline: true,
+  reonline_cooldown_sec: 300,
+  send_timeout_sec: 8,
+  hooks: [] as HookForm[],
 });
 
 function text(v: unknown, fallback = ""): string {
@@ -87,6 +124,33 @@ function applyVisual(visual: Dict) {
   form.channel = num(b.channel ?? 6, 6);
   form.lost_timeout = num(b.lost_timeout ?? 15, 15);
   form.min_gap = num(b.min_gap ?? 0.5, 0.5);
+  /* Web 访问控制 */
+  form.access_enabled = !!w.access_list_enabled;
+  form.access_mode = text(w.access_list_mode, "allow");
+  form.access_list = Array.isArray(w.access_list) ? (w.access_list as Array<unknown>).map((x) => text(x, "").trim()).filter(Boolean) : [];
+  /* 报警区域 */
+  const zonesRaw = Array.isArray(w.alarm_zones) ? (w.alarm_zones as Array<Dict>) : [];
+  form.alarm_zones = zonesRaw.map((z) => ({
+    enabled: !!z.enabled,
+    name: text(z.name, ""),
+    lat1: z.lat1 == null ? "" : String(z.lat1),
+    lon1: z.lon1 == null ? "" : String(z.lon1),
+    lat2: z.lat2 == null ? "" : String(z.lat2),
+    lon2: z.lon2 == null ? "" : String(z.lon2),
+  }));
+  /* 通知 */
+  const n = (visual.notify ?? {}) as Dict;
+  form.notify_enabled = !!n.enabled;
+  form.notify_reonline = n.notify_reonline !== false;
+  form.reonline_cooldown_sec = num(n.reonline_cooldown_sec ?? 300, 300);
+  form.send_timeout_sec = num(n.send_timeout_sec ?? 8, 8);
+  const hooksRaw = Array.isArray(n.wecom_webhooks) ? (n.wecom_webhooks as Array<Dict>) : [];
+  form.hooks = hooksRaw.map((h, idx) => ({
+    index: num(h.index ?? idx, idx),
+    name: text(h.name, `通道 ${idx + 1}`),
+    enabled: h.enabled !== false,
+    key: "",
+  }));
 }
 
 async function load() {
@@ -131,6 +195,25 @@ async function load() {
   }
 }
 
+function addZone() {
+  form.alarm_zones.push({ enabled: false, name: "", lat1: "", lon1: "", lat2: "", lon2: "" });
+}
+function removeZone(i: number) {
+  form.alarm_zones.splice(i, 1);
+}
+function addAccess() {
+  form.access_list.push("");
+}
+function removeAccess(i: number) {
+  form.access_list.splice(i, 1);
+}
+function addHook() {
+  form.hooks.push({ index: -1, name: "", enabled: true, key: "" });
+}
+function removeHook(i: number) {
+  form.hooks.splice(i, 1);
+}
+
 async function save() {
   saving.value = true;
   try {
@@ -155,7 +238,36 @@ async function save() {
       web.base_lat = Number(latS);
       web.base_lon = Number(lonS);
     }
-    const d = (await postJson("/api/settings/visual/save", { basic, web })) as Dict;
+    web.access_list_enabled = form.access_enabled;
+    web.access_list_mode = form.access_mode;
+    web.access_list = [...form.access_list].map((x) => x.trim()).filter(Boolean);
+    web.alarm_zones = form.alarm_zones.map((z, i) => {
+      const raw = [z.lat1, z.lon1, z.lat2, z.lon2].map((v) => {
+        const s = String(v ?? "").trim();
+        return s === "" ? null : Number(s);
+      });
+      return {
+        enabled: !!z.enabled,
+        name: z.name.trim() || `报警区域 ${i + 1}`,
+        lat1: raw[0],
+        lon1: raw[1],
+        lat2: raw[2],
+        lon2: raw[3],
+      };
+    });
+    const notifyPayload: Dict = {
+      enabled: form.notify_enabled,
+      notify_reonline: form.notify_reonline,
+      reonline_cooldown_sec: num(form.reonline_cooldown_sec, 300),
+      send_timeout_sec: num(form.send_timeout_sec, 8),
+      wecom_webhooks: form.hooks.map((h, i) => ({
+        index: h.index >= 0 ? h.index : i,
+        name: h.name.trim() || `通道 ${i + 1}`,
+        enabled: h.enabled,
+        key: h.key.trim(),
+      })),
+    };
+    const d = (await postJson("/api/settings/visual/save", { basic, web, notify: notifyPayload })) as Dict;
     if (d.ok === false) {
       notify(text(d.error, "保存失败"), true);
       return;
@@ -255,6 +367,67 @@ onMounted(() => {
             <VTextField v-model.number="form.map_tile_max_native_zoom" label="原生最大缩放" type="number" min="1" max="30" density="compact" variant="outlined" hide-details />
           </div>
         </section>
+
+        <!-- Web 访问控制 -->
+        <section class="st-card">
+          <h2>Web 访问控制</h2>
+          <VSwitch v-model="form.access_enabled" label="启用访问名单" color="primary" hide-details class="mb-3" />
+          <VSelect
+            v-model="form.access_mode"
+            label="名单模式"
+            :items="[{ title: '允许名单', value: 'allow' }, { title: '拒绝名单', value: 'deny' }]"
+            :disabled="!form.access_enabled"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="mb-2"
+          />
+          <div v-for="(addr, i) in form.access_list" :key="i" class="d-flex ga-2 mb-2">
+            <VTextField v-model="form.access_list[i]" label="IP / CIDR" density="compact" variant="outlined" hide-details class="flex-grow-1" />
+            <VBtn icon="mdi-delete-outline" size="small" variant="text" @click="removeAccess(i)" />
+          </div>
+          <VBtn size="small" variant="outlined" color="primary" @click="addAccess">添加地址</VBtn>
+        </section>
+
+        <!-- 报警区域 -->
+        <section class="st-card">
+          <h2>报警区域</h2>
+          <div v-if="!form.alarm_zones.length" class="muted-note mb-2">尚未配置报警区域</div>
+          <div v-for="(zone, i) in form.alarm_zones" :key="i" class="zone-box mb-3">
+            <div class="d-flex align-center ga-2 mb-2">
+              <VSwitch v-model="zone.enabled" color="primary" hide-details />
+              <VTextField v-model="zone.name" label="名称" density="compact" variant="outlined" hide-details class="flex-grow-1" />
+              <VBtn icon="mdi-delete-outline" size="small" variant="text" @click="removeZone(i)" />
+            </div>
+            <div class="zone-grid">
+              <VTextField v-model="zone.lat1" label="纬度1" density="compact" variant="outlined" hide-details />
+              <VTextField v-model="zone.lon1" label="经度1" density="compact" variant="outlined" hide-details />
+              <VTextField v-model="zone.lat2" label="纬度2" density="compact" variant="outlined" hide-details />
+              <VTextField v-model="zone.lon2" label="经度2" density="compact" variant="outlined" hide-details />
+            </div>
+          </div>
+          <VBtn size="small" variant="outlined" color="primary" @click="addZone">添加区域</VBtn>
+        </section>
+
+        <!-- 通知/企业微信 -->
+        <section class="st-card">
+          <h2>通知 / 企业微信</h2>
+          <VSwitch v-model="form.notify_enabled" label="启用通知" color="primary" hide-details class="mb-3" />
+          <VSwitch v-model="form.notify_reonline" label="目标恢复在线时通知" color="primary" hide-details class="mb-3" />
+          <div class="d-flex ga-2 mb-3">
+            <VTextField v-model.number="form.reonline_cooldown_sec" label="重复在线提醒冷却(s)" type="number" min="0" density="compact" variant="outlined" hide-details />
+            <VTextField v-model.number="form.send_timeout_sec" label="发送超时(s)" type="number" min="2" density="compact" variant="outlined" hide-details />
+          </div>
+          <div v-for="(hook, i) in form.hooks" :key="hook.index" class="hook-box mb-2">
+            <div class="d-flex align-center ga-2 mb-1">
+              <VSwitch v-model="hook.enabled" color="primary" hide-details />
+              <VTextField v-model="hook.name" label="通道名称" density="compact" variant="outlined" hide-details class="flex-grow-1" />
+              <VBtn icon="mdi-delete-outline" size="small" variant="text" @click="removeHook(i)" />
+            </div>
+            <VTextField v-model="hook.key" label="Webhook Key（留空保持现有密钥）" density="compact" variant="outlined" hide-details />
+          </div>
+          <VBtn size="small" variant="outlined" color="primary" @click="addHook">添加通道</VBtn>
+        </section>
       </div>
 
       <div class="st-actions">
@@ -330,6 +503,25 @@ onMounted(() => {
 
 .mono {
   font-family: var(--mono);
+}
+
+.zone-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.zone-box,
+.hook-box {
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 8px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--card) 70%, transparent);
+}
+
+.muted-note {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .st-actions {
