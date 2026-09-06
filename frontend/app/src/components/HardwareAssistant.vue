@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { VBtn, VChip, VSelect, VTextField } from "vuetify/components";
 import { pageFetch, postJson } from "../composables/pageApi";
 
 interface IfaceItem {
@@ -30,6 +31,8 @@ const activeIface = ref<string>("");
 const snf = ref<Record<string, unknown>>({});
 const currentChannel = ref<number>(0);
 const extra = ref<string>("-");
+
+const ifaceOptions = computed(() => items.value.map((it) => String(it.name ?? "")).filter(Boolean));
 
 const ifaceSel = ref<string>("");
 const channelInput = ref<number>(6);
@@ -162,34 +165,40 @@ onBeforeUnmount(() => {
         <section class="hw-card">
           <h2>网卡控制</h2>
           <div class="hw-grid">
-            <label class="hw-field">
-              <span>目标网卡</span>
-              <select v-model="ifaceSel">
-                <option value="">请选择固定网卡</option>
-                <option v-for="it in items" :key="it.name" :value="String(it.name || '')">
-                  {{ it.name }} [{{ text(it.mode, "net") }}] {{ text(it.model || it.driver || bandOf(it), "") }}
-                </option>
-              </select>
-            </label>
-            <label class="hw-field">
-              <span>目标信道</span>
-              <input v-model.number="channelInput" type="number" min="1" max="196" />
-            </label>
+            <VSelect
+              v-model="ifaceSel"
+              label="目标网卡"
+              density="compact"
+              variant="outlined"
+              hide-details
+              :items="ifaceOptions"
+              placeholder="请选择固定网卡"
+            />
+            <VTextField
+              v-model.number="channelInput"
+              label="目标信道"
+              type="number"
+              min="1"
+              max="196"
+              density="compact"
+              variant="outlined"
+              hide-details
+            />
           </div>
           <div class="hw-btns">
             <div class="hw-row">
-              <button type="button" :disabled="!!busy" @click="runOp('iw_dev')">查看 iw dev</button>
-              <button type="button" :disabled="!!busy || !ifaceSel" @click="runOp('iw_info')">查看 iw info</button>
-              <button type="button" :disabled="!!busy || !ifaceSel" @click="runOp('iw_link')">查看 iw link</button>
+              <VBtn size="small" variant="outlined" :loading="busy === 'iw_dev'" @click="runOp('iw_dev')">查看 iw dev</VBtn>
+              <VBtn size="small" variant="outlined" :disabled="!ifaceSel" :loading="busy === 'iw_info'" @click="runOp('iw_info')">查看 iw info</VBtn>
+              <VBtn size="small" variant="outlined" :disabled="!ifaceSel" :loading="busy === 'iw_link'" @click="runOp('iw_link')">查看 iw link</VBtn>
             </div>
             <div class="hw-row">
-              <button type="button" :disabled="!!busy || !ifaceSel" @click="runOp('set_monitor')">切换为监控模式</button>
-              <button type="button" :disabled="!!busy || !ifaceSel" @click="runOp('set_managed')">切换为托管模式</button>
-              <button type="button" :disabled="!!busy || !ifaceSel" @click="runOp('set_channel')">应用目标信道</button>
+              <VBtn size="small" color="primary" :disabled="!ifaceSel" :loading="busy === 'set_monitor'" @click="runOp('set_monitor')">切换为监控模式</VBtn>
+              <VBtn size="small" variant="outlined" :disabled="!ifaceSel" :loading="busy === 'set_managed'" @click="runOp('set_managed')">切换为托管模式</VBtn>
+              <VBtn size="small" color="secondary" :disabled="!ifaceSel" :loading="busy === 'set_channel'" @click="runOp('set_channel')">应用目标信道</VBtn>
             </div>
             <div class="hw-row">
-              <button type="button" :disabled="!!busy || !ifaceSel" @click="runOp('restart_iface')">重启网卡</button>
-              <button type="button" class="danger" :disabled="!!busy" @click="onRestartProgram">重启主程序</button>
+              <VBtn size="small" color="warning" variant="tonal" :disabled="!ifaceSel" :loading="busy === 'restart_iface'" @click="runOp('restart_iface')">重启网卡</VBtn>
+              <VBtn size="small" color="error" :loading="busy === 'restart_program'" @click="onRestartProgram">重启主程序</VBtn>
             </div>
           </div>
         </section>
@@ -201,10 +210,17 @@ onBeforeUnmount(() => {
             <div v-for="it in items" :key="it.name" class="hw-iface">
               <div class="iface-name">{{ text(it.name, "-") }}</div>
               <div class="iface-tags">
-                <span class="tag" :class="it.is_monitor ? 'ok' : 'warn'">
+                <VChip size="x-small" variant="tonal" label :color="it.is_monitor ? 'success' : 'warning'">
                   {{ it.is_monitor ? "监控模式" : "非监控模式" }}
-                </span>
-                <span v-if="it.supports_monitor === false && it.is_wireless" class="tag warn" title="驱动不支持监听模式">无 monitor</span>
+                </VChip>
+                <VChip
+                  v-if="it.supports_monitor === false && it.is_wireless"
+                  size="x-small"
+                  color="error"
+                  variant="tonal"
+                  label
+                  title="驱动不支持监听模式"
+                >无 monitor</VChip>
               </div>
               <div class="iface-meta">
                 型号: {{ text(it.model || it.driver, "未知型号") }}<br />
@@ -223,7 +239,7 @@ onBeforeUnmount(() => {
         <section class="hw-card">
           <div class="hw-card-head">
             <h2>命令输出</h2>
-            <button type="button" @click="refresh">刷新状态</button>
+            <VBtn size="small" variant="outlined" color="primary" @click="refresh">刷新状态</VBtn>
           </div>
           <pre class="hw-output">{{ outputText }}</pre>
         </section>
@@ -250,9 +266,11 @@ onBeforeUnmount(() => {
 }
 
 .hw-card {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--border) calc(var(--xrs-line-alpha, 1) * 100%), transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--card) calc(var(--xrs-card-alpha, 1) * 100%), transparent);
+  -webkit-backdrop-filter: blur(var(--xrs-blur, 0px)) saturate(1.2);
+  backdrop-filter: blur(var(--xrs-blur, 0px)) saturate(1.2);
   padding: 12px 14px;
 }
 
