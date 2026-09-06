@@ -29,6 +29,8 @@ let fittedOnce = false;
 
 let selectedSn = "";
 let userHiddenSn = "";
+// 该机已加载过的历史轨迹缓存（再次点击可立即绘制，不等网络）
+const trackCache = new Map<string, Array<{ lat: number; lng: number }>>();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let trackLayer: any = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -279,6 +281,34 @@ function clearTrackLayer() {
   selLastPt = null;
 }
 
+// 记录当前已画出的轨迹到缓存，供下次点击立即显示
+function captureTrackCache(sn: string) {
+  try {
+    const line = selAircraftLine as { getLatLngs?: () => unknown } | null;
+    const ls = line?.getLatLngs?.() as Array<{ lat: number; lng: number }> | null;
+    if (Array.isArray(ls) && ls.length) {
+      trackCache.set(
+        sn,
+        ls.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) })),
+      );
+      return;
+    }
+  } catch (_e) {
+    /* ignore */
+  }
+  trackCache.delete(sn);
+}
+
+// 立即用缓存绘制该机轨迹（无缓存则不处理）
+function drawCachedTrack(sn: string): boolean {
+  const cached = trackCache.get(sn);
+  if (!cached || !cached.length) return false;
+  const pts = cached.map((p) => [Number(p.lat), Number(p.lng)] as [number, number]);
+  ensureAircraftLine().setLatLngs(pts);
+  selLastPt = pts[pts.length - 1];
+  return true;
+}
+
 function ensureAircraftLine() {
   if (!selAircraftLine) {
     selAircraftLine = L.polyline([], { color: "#2f81f7", weight: 3, opacity: 0.95 }).addTo(ensureTrackLayer());
@@ -340,10 +370,12 @@ function selectDrone(sn: string) {
   if (pilot) {
     ensurePilotMark().setLatLng(pilot);
   }
+  // 有缓存则立即绘制，减少等待
+  drawCachedTrack(sn);
   void (async () => {
     try {
       const d = (await pageFetch(
-        `/api/drones/get?sn=${encodeURIComponent(sn)}&include_tracks=1`,
+        `/api/drones/get?sn=${encodeURIComponent(sn)}&include_tracks=1&limit=4000`,
       )) as Record<string, unknown>;
       if (!map || seq !== selectSeq || selectedSn !== sn) return;
       const tracks = d.tracks && typeof d.tracks === "object" ? (d.tracks as Record<string, unknown>) : {};
@@ -365,6 +397,10 @@ function selectDrone(sn: string) {
       if (aircraft.length) {
         ensureAircraftLine().setLatLngs(aircraft);
         selLastPt = aircraft[aircraft.length - 1];
+        trackCache.set(
+          sn,
+          aircraft.map((p) => ({ lat: p[0], lng: p[1] })),
+        );
       }
       if (operator.length >= 2) {
         L.polyline(operator, { color: "#e67e22", weight: 2, opacity: 0.8 }).addTo(trackLayer);
@@ -408,7 +444,8 @@ function applyDrones() {
         .bindTooltip(tooltip, { sticky: true })
         .on("click", () => {
           if (selectedSn === sn) {
-            // 再次点击同一图标：隐藏轨迹（并让在途历史请求失效）
+            // 再次点击同一图标：隐藏轨迹（先记录当前轨迹供下次立即显示）
+            captureTrackCache(sn);
             selectedSn = "";
             userHiddenSn = sn;
             selectSeq++; // 使历史回填请求的 seq 校验失败，避免延迟到达后重画
