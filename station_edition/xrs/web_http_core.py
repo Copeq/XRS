@@ -5,6 +5,21 @@ web_server.py during backend module split. Page HTML building stays in web_serve
 Loaded into the assembled runtime namespace by runtime.py (see DEFAULT_CHUNK_FILES).
 """
 
+try:
+    import orjson as _orjson
+except Exception:  # pragma: no cover - portable env may lack orjson
+    _orjson = None
+
+def _json_dumps_fast(obj: dict) -> bytes:
+    """高性能 JSON 序列化：优先 orjson（UTF-8 bytes），失败回退 stdlib。"""
+    if _orjson is not None:
+        try:
+            return _orjson.dumps(obj, option=_orjson.OPT_NON_STR_KEYS)
+        except Exception:
+            pass
+    import json as _fallback_json
+    return _fallback_json.dumps(obj, ensure_ascii=False).encode("utf-8")
+
 def _web_frontend_mode() -> str:
     """返回前端 UI 产物策略：vue（Vite 壳）/ legacy（web_server.py 模板）。
 
@@ -86,7 +101,7 @@ def http_server_thread() -> None:
                 raise
 
         def _send_json(self, obj: dict, code: int = 200):
-            body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+            body = _json_dumps_fast(obj)
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
@@ -1299,8 +1314,7 @@ def http_server_thread() -> None:
                 import json as _json
                 try:
                     initial_payload = _ws_settings_runtime_payload() if ws_mode == "settings" else _state_snapshot(lightweight=True)
-                    _ws_send_client(client_entry, _ws_frame(
-                        _json.dumps(initial_payload, ensure_ascii=False).encode()))
+                    _ws_send_client(client_entry, _ws_frame(_json_dumps_fast(initial_payload)))
                 except Exception:
                     pass
                 # Keep connection open and drain incoming frames until disconnect.
@@ -1320,7 +1334,7 @@ def http_server_thread() -> None:
                             continue
                         if isinstance(message, dict) and message.get("kind") == "ping":
                             pong = {"kind": "pong", "id": str(message.get("id") or "")[:80]}
-                            _ws_send_client(client_entry, _ws_frame(_json.dumps(pong).encode("utf-8")))
+                            _ws_send_client(client_entry, _ws_frame(_json_dumps_fast(pong)))
                 except Exception:
                     pass
                 with _ws_lock:

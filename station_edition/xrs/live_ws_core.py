@@ -4,6 +4,21 @@ Loaded into the assembled runtime namespace by runtime.py (see DEFAULT_CHUNK_FIL
 References to live state / track / history helpers resolve at call time.
 """
 
+try:
+    import orjson as _ws_orjson
+except Exception:  # pragma: no cover - portable env may lack orjson
+    _ws_orjson = None
+
+def _ws_json_dumps(obj: dict) -> bytes:
+    """高性能 JSON 序列化：优先 orjson，失败回退 stdlib。"""
+    if _ws_orjson is not None:
+        try:
+            return _ws_orjson.dumps(obj, option=_ws_orjson.OPT_NON_STR_KEYS)
+        except Exception:
+            pass
+    import json as _ws_json
+    return _ws_json.dumps(obj, ensure_ascii=False).encode("utf-8")
+
 def _ws_settings_runtime_payload() -> dict:
     aps, aps_seq, aps_total = _ap_snapshot()
     return {
@@ -201,8 +216,8 @@ def _ws_push_loop() -> None:
                     if now < float(client.get("next_send_at") or 0.0):
                         continue
                     if settings_frame is None:
-                        settings_payload = _json.dumps(_ws_settings_runtime_payload(), ensure_ascii=False)
-                        settings_frame = _ws_frame(settings_payload.encode())
+                        settings_payload = _ws_json_dumps(_ws_settings_runtime_payload())
+                        settings_frame = _ws_frame(settings_payload)
                     _ws_send_client(client, settings_frame)
                     client["next_send_at"] = now + 5.0
                 else:
@@ -214,8 +229,8 @@ def _ws_push_loop() -> None:
                             home_snapshot.pop("logs", None)
                         if last_home_aps_seq == aps_seq:
                             home_snapshot.pop("aps", None)
-                        home_payload = _json.dumps(home_snapshot, ensure_ascii=False)
-                        home_frame = _ws_frame(home_payload.encode())
+                        home_payload = _ws_json_dumps(home_snapshot)
+                        home_frame = _ws_frame(home_payload)
                         last_home_logs_seq = logs_seq
                         last_home_aps_seq = aps_seq
                     _ws_send_client(client, home_frame)
