@@ -36,7 +36,6 @@ station_edition/history-cache.json
 host_metrics.jsonl
 host_metrics.jsonl.tmp
 xrs_scanner/
-oui.txt
 rid-n/ridn_config.json
 rid-n/**/*.runtime.json
 rid-n/data/
