@@ -76,7 +76,8 @@ def _download_oui_db(path: str) -> tuple[bool, str]:
         method="GET",
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        # 6.6MB 文件在网络抖动时可能需要数十秒，默认 15s 容易超时；放宽到 60s。
+        with urllib.request.urlopen(req, timeout=60) as resp:
             data = resp.read()
     except Exception as e:
         return False, str(e)
