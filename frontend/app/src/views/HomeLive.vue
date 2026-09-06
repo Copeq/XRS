@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useLiveSocket, type DroneRow } from "../composables/useLiveSocket";
+import { useUiTheme } from "../composables/useUiTheme";
 import AppHeader from "../components/AppHeader.vue";
 import LiveMap from "../components/LiveMap.vue";
 import HardwareAssistant from "../components/HardwareAssistant.vue";
@@ -22,6 +23,12 @@ const page = ref<PageKey>(initialPage());
 function setPage(p: PageKey) {
   page.value = p;
 }
+
+/* 恢复/应用主页背景与玻璃主题（全 SPA 只需要挂载一次） */
+const { apply: applyUiTheme } = useUiTheme();
+onMounted(() => {
+  applyUiTheme();
+});
 
 const liveRows = computed(() =>
   state.drones
@@ -198,13 +205,15 @@ function logCls(row: unknown): string {
 }
 
 .panel {
-  border: 1px solid var(--border);
-  background: var(--card);
-  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) calc(var(--xrs-line-alpha, 1) * 100%), transparent);
+  background: color-mix(in srgb, var(--card) calc(var(--xrs-card-alpha, 1) * 100%), transparent);
+  border-radius: 10px;
   display: flex;
   flex-direction: column;
   min-height: 280px;
   overflow: hidden;
+  -webkit-backdrop-filter: blur(var(--xrs-blur, 0px)) saturate(1.2);
+  backdrop-filter: blur(var(--xrs-blur, 0px)) saturate(1.2);
 }
 
 .panel h2 {

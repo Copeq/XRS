@@ -8,6 +8,10 @@
   --warn: #d83b01;
   --green: #2ea043;
   --mono: "SFMono-Regular", "Cascadia Mono", Consolas, "Courier New", monospace;
+  /* 玻璃拟态（由 useUiTheme 动态覆盖） */
+  --xrs-blur: 0px;
+  --xrs-card-alpha: 1;
+  --xrs-line-alpha: 1;
 }
 
 @media (prefers-color-scheme: dark) {

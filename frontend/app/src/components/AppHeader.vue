@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { postJson, pageFetch } from "../composables/pageApi";
+import { useUiTheme } from "../composables/useUiTheme";
 import type { HomeState } from "../composables/useLiveSocket";
 
 const props = defineProps<{ state: HomeState; page: "live" | "history" | "hardware" | "settings" }>();
@@ -76,6 +77,31 @@ function goHardware() {
 function goSettings() {
   moreOpen.value = false;
   emit("set-page", "settings");
+}
+
+/* 外观/背景主题 */
+const themeOpen = ref(false);
+const uiTheme = useUiTheme();
+const urlDraft = ref<string>(uiTheme.state.url);
+function openTheme() {
+  urlDraft.value = uiTheme.state.url;
+  themeOpen.value = true;
+  moreOpen.value = false;
+}
+function themeBlur(v: string | number) {
+  uiTheme.setBlur(Number(v) || 0);
+}
+function themeOverlay(v: string | number) {
+  uiTheme.setOverlay(Number(v) || 0);
+}
+function themeEnabledChanged(ev: Event) {
+  uiTheme.setEnabled((ev.target as HTMLInputElement).checked);
+}
+function themeBlurInput(ev: Event) {
+  themeBlur((ev.target as HTMLInputElement).value);
+}
+function themeOverlayInput(ev: Event) {
+  themeOverlay((ev.target as HTMLInputElement).value);
 }
 
 /* 通知中心 */
@@ -244,6 +270,8 @@ async function simStop() {
         <span class="chip"><b>总计</b> {{ totalCount }}</span>
         <span class="chip mono">更新 {{ state.ts || "--:--:--" }}</span>
 
+        <button class="chip-btn" type="button" @click="openTheme">外观</button>
+
         <div class="notify-wrap">
           <button class="chip-btn" type="button" @click="toggleNotify">
             通知{{ notifyCount() ? ` (${notifyCount()})` : "" }}
@@ -322,13 +350,62 @@ async function simStop() {
         </div>
       </div>
     </div>
+
+    <!-- 外观背景设置 -->
+    <div v-if="themeOpen" class="modal-mask" @click.self="themeOpen = false">
+      <div class="modal theme-modal">
+        <div class="modal-head">
+          <strong>外观背景</strong>
+          <span class="muted">自定义背景 + 玻璃虚化</span>
+          <button class="banner-close" type="button" @click="themeOpen = false">×</button>
+        </div>
+        <div class="theme-body">
+          <label class="theme-row theme-toggle">
+            <input type="checkbox" :checked="uiTheme.state.enabled" @change="themeEnabledChanged" />
+            <span>启用自定义背景</span>
+          </label>
+          <div class="theme-row">
+            <span class="theme-cap">背景预设</span>
+            <div class="theme-presets">
+              <button
+                v-for="p in uiTheme.presets"
+                :key="p.key"
+                type="button"
+                class="swatch"
+                :class="{ on: uiTheme.state.enabled && uiTheme.state.mode === 'preset' && uiTheme.state.preset === p.key }"
+                :style="{ background: p.css || 'linear-gradient(160deg,#3a3f4b,#262a33)' }"
+                :title="p.label"
+                @click="uiTheme.setPreset(p.key)"
+              >{{ p.label }}</button>
+            </div>
+          </div>
+          <div class="theme-row">
+            <span class="theme-cap">自定义图片 URL</span>
+            <div class="theme-url-row">
+              <input v-model="urlDraft" type="text" placeholder="https://…/background.jpg" @keyup.enter="uiTheme.setUrl(urlDraft)" />
+              <button type="button" @click="uiTheme.setUrl(urlDraft)">应用</button>
+            </div>
+          </div>
+          <div class="theme-row theme-sliders">
+            <label><span>虚化</span><input type="range" min="0" max="40" :value="uiTheme.state.blur" @input="themeBlurInput" /><b>{{ uiTheme.state.blur }}px</b></label>
+            <label><span>遮罩</span><input type="range" min="0" max="70" :value="Math.round(uiTheme.state.overlay * 100)" @input="themeOverlayInput" /><b>{{ Math.round(uiTheme.state.overlay * 100) }}%</b></label>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn" @click="uiTheme.reset(); urlDraft = ''">恢复默认</button>
+          <button type="button" class="btn primary" @click="themeOpen = false">完成</button>
+        </div>
+      </div>
+    </div>
   </header>
 </template>
 
 <style scoped>
 .app-header {
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--card) 96%, var(--txt) 4%);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) calc(var(--xrs-line-alpha, 1) * 100%), transparent);
+  background: color-mix(in srgb, var(--card) calc(var(--xrs-card-alpha, 1) * 96%), transparent);
+  -webkit-backdrop-filter: blur(var(--xrs-blur, 0px)) saturate(1.2);
+  backdrop-filter: blur(var(--xrs-blur, 0px)) saturate(1.2);
 }
 
 .header-main {
@@ -381,10 +458,10 @@ async function simStop() {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--border) calc(var(--xrs-line-alpha, 1) * 90%), transparent);
   border-radius: 999px;
   padding: 3px 9px;
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) calc(var(--xrs-card-alpha, 1) * 88%), transparent);
 }
 
 .chip b {
@@ -418,8 +495,10 @@ async function simStop() {
   top: calc(100% + 6px);
   min-width: 180px;
   z-index: 60;
-  border: 1px solid var(--border);
-  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--border) calc(var(--xrs-line-alpha, 1) * 90%), transparent);
+  background: color-mix(in srgb, var(--card) calc(var(--xrs-card-alpha, 1) * 92%), transparent);
+  -webkit-backdrop-filter: blur(var(--xrs-blur, 0px)) saturate(1.2);
+  backdrop-filter: blur(var(--xrs-blur, 0px)) saturate(1.2);
   border-radius: 10px;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.14);
   padding: 6px;
@@ -690,5 +769,102 @@ async function simStop() {
 .modal-foot .btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.theme-modal {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.theme-body {
+  display: grid;
+  gap: 12px;
+  padding: 2px 0 10px;
+}
+
+.theme-row {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--txt);
+}
+
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.theme-toggle input {
+  width: auto;
+}
+
+.theme-cap {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.theme-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.swatch {
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--txt);
+  cursor: pointer;
+  background: var(--bg);
+}
+
+.swatch.on {
+  border-color: var(--blue);
+  color: var(--blue);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 22%, transparent);
+}
+
+.theme-url-row {
+  display: flex;
+  gap: 8px;
+}
+
+.theme-url-row input {
+  flex: 1;
+}
+
+.theme-url-row button {
+  border: 1px solid var(--blue);
+  background: var(--blue);
+  color: #fff;
+  border-radius: 6px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.theme-sliders {
+  display: grid;
+  gap: 8px;
+}
+
+.theme-sliders label {
+  display: grid;
+  grid-template-columns: 52px 1fr 52px;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.theme-sliders b {
+  text-align: right;
+  color: var(--txt);
+}
+
+.theme-sliders input[type="range"] {
+  width: 100%;
+  accent-color: var(--blue);
+  padding: 0;
 }
 </style>
