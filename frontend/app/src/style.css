@@ -38,6 +38,11 @@ body {
     "Microsoft YaHei", "Noto Sans SC", sans-serif;
 }
 
+/* Vuetify 根容器：让自定义 body 背景透出（玻璃/背景主题由 HomeLive 控制） */
+.xrs-app {
+  background: transparent !important;
+}
+
 .shell {
   max-width: 920px;
   margin: 0 auto;

@@ -3,5 +3,7 @@ import HomeLive from "./views/HomeLive.vue";
 </script>
 
 <template>
-  <HomeLive />
+  <v-app class="xrs-app">
+    <HomeLive />
+  </v-app>
 </template>
