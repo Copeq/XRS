@@ -1,7 +1,5 @@
 import { createApp } from "vue";
 import { createVuetify } from "vuetify";
-import * as components from "vuetify/components";
-import * as directives from "vuetify/directives";
 import "vuetify/styles";
 import "@mdi/font/css/materialdesignicons.css";
 import App from "./App.vue";
@@ -53,15 +51,13 @@ const xrsDark = {
   },
 };
 
+// 主题默认跟随系统深浅色；组件按需在 SFC 内 import，保证可 tree-shaking。
+const prefersLight = window.matchMedia?.("(prefers-color-scheme: light)")?.matches;
+
 const vuetify = createVuetify({
-  components,
-  directives,
   theme: {
-    defaultTheme: "xrsDark",
-    themes: {
-      xrsDark,
-      xrsLight,
-    },
+    defaultTheme: prefersLight ? "xrsLight" : "xrsDark",
+    themes: { xrsDark, xrsLight },
   },
 });
 

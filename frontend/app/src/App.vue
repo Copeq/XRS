@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { VApp } from "vuetify/components";
 import HomeLive from "./views/HomeLive.vue";
 </script>
 
 <template>
-  <v-app class="xrs-app">
+  <VApp class="xrs-app">
     <HomeLive />
-  </v-app>
+  </VApp>
 </template>

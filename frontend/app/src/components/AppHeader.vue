@@ -1,5 +1,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import {
+  VBtn,
+  VCard,
+  VCardActions,
+  VCardText,
+  VDialog,
+  VSlider,
+  VSpacer,
+  VSwitch,
+  VTextField,
+  VToolbar,
+  VToolbarTitle,
+} from "vuetify/components";
 import { postJson, pageFetch } from "../composables/pageApi";
 import { useUiTheme } from "../composables/useUiTheme";
 import type { HomeState } from "../composables/useLiveSocket";
@@ -88,21 +101,18 @@ function openTheme() {
   themeOpen.value = true;
   moreOpen.value = false;
 }
-function themeBlur(v: string | number) {
-  uiTheme.setBlur(Number(v) || 0);
-}
-function themeOverlay(v: string | number) {
-  uiTheme.setOverlay(Number(v) || 0);
-}
-function themeEnabledChanged(ev: Event) {
-  uiTheme.setEnabled((ev.target as HTMLInputElement).checked);
-}
-function themeBlurInput(ev: Event) {
-  themeBlur((ev.target as HTMLInputElement).value);
-}
-function themeOverlayInput(ev: Event) {
-  themeOverlay((ev.target as HTMLInputElement).value);
-}
+const themeEnabledModel = computed({
+  get: () => uiTheme.state.enabled,
+  set: (v: boolean) => uiTheme.setEnabled(!!v),
+});
+const themeBlurModel = computed({
+  get: () => uiTheme.state.blur,
+  set: (v: unknown) => uiTheme.setBlur(Number(v) || 0),
+});
+const themeOverlayModel = computed({
+  get: () => uiTheme.state.overlay,
+  set: (v: unknown) => uiTheme.setOverlay(Number(v) || 0),
+});
 
 /* 通知中心 */
 interface NotifyItem {
@@ -351,52 +361,76 @@ async function simStop() {
       </div>
     </div>
 
-    <!-- 外观背景设置 -->
-    <div v-if="themeOpen" class="modal-mask" @click.self="themeOpen = false">
-      <div class="modal theme-modal">
-        <div class="modal-head">
-          <strong>外观背景</strong>
-          <span class="muted">自定义背景 + 玻璃虚化</span>
-          <button class="banner-close" type="button" @click="themeOpen = false">×</button>
-        </div>
-        <div class="theme-body">
-          <label class="theme-row theme-toggle">
-            <input type="checkbox" :checked="uiTheme.state.enabled" @change="themeEnabledChanged" />
-            <span>启用自定义背景</span>
-          </label>
-          <div class="theme-row">
-            <span class="theme-cap">背景预设</span>
-            <div class="theme-presets">
-              <button
-                v-for="p in uiTheme.presets"
-                :key="p.key"
-                type="button"
-                class="swatch"
-                :class="{ on: uiTheme.state.enabled && uiTheme.state.mode === 'preset' && uiTheme.state.preset === p.key }"
-                :style="{ background: p.css || 'linear-gradient(160deg,#3a3f4b,#262a33)' }"
-                :title="p.label"
-                @click="uiTheme.setPreset(p.key)"
-              >{{ p.label }}</button>
-            </div>
+    <!-- 外观背景设置（Vuetify） -->
+    <VDialog v-model="themeOpen" max-width="560">
+      <VCard rounded="lg" class="theme-dialog">
+        <VToolbar density="compact" color="transparent">
+          <VToolbarTitle class="text-subtitle-1 font-weight-bold">外观背景</VToolbarTitle>
+          <VSpacer />
+          <VBtn icon="mdi-close" variant="text" size="small" @click="themeOpen = false" />
+        </VToolbar>
+        <VCardText>
+          <VSwitch
+            v-model="themeEnabledModel"
+            color="primary"
+            label="启用自定义背景"
+            hide-details
+            class="mb-3"
+          />
+          <div class="text-caption text-medium-emphasis mb-1">背景预设</div>
+          <div class="d-flex flex-wrap ga-2 mb-3">
+            <VBtn
+              v-for="p in uiTheme.presets"
+              :key="p.key"
+              size="small"
+              :variant="uiTheme.state.enabled && uiTheme.state.mode === 'preset' && uiTheme.state.preset === p.key ? 'flat' : 'tonal'"
+              :color="uiTheme.state.enabled && uiTheme.state.mode === 'preset' && uiTheme.state.preset === p.key ? 'primary' : undefined"
+              @click="uiTheme.setPreset(p.key)"
+            >{{ p.label }}</VBtn>
           </div>
-          <div class="theme-row">
-            <span class="theme-cap">自定义图片 URL</span>
-            <div class="theme-url-row">
-              <input v-model="urlDraft" type="text" placeholder="https://…/background.jpg" @keyup.enter="uiTheme.setUrl(urlDraft)" />
-              <button type="button" @click="uiTheme.setUrl(urlDraft)">应用</button>
-            </div>
+          <div class="text-caption text-medium-emphasis mb-1">自定义图片 URL</div>
+          <div class="d-flex ga-2 mb-3">
+            <VTextField
+              v-model="urlDraft"
+              density="compact"
+              variant="outlined"
+              placeholder="https://…/background.jpg"
+              hide-details
+              @keyup.enter="uiTheme.setUrl(urlDraft)"
+            />
+            <VBtn variant="tonal" color="primary" @click="uiTheme.setUrl(urlDraft)">应用</VBtn>
           </div>
-          <div class="theme-row theme-sliders">
-            <label><span>虚化</span><input type="range" min="0" max="40" :value="uiTheme.state.blur" @input="themeBlurInput" /><b>{{ uiTheme.state.blur }}px</b></label>
-            <label><span>遮罩</span><input type="range" min="0" max="70" :value="Math.round(uiTheme.state.overlay * 100)" @input="themeOverlayInput" /><b>{{ Math.round(uiTheme.state.overlay * 100) }}%</b></label>
-          </div>
-        </div>
-        <div class="modal-foot">
-          <button type="button" class="btn" @click="uiTheme.reset(); urlDraft = ''">恢复默认</button>
-          <button type="button" class="btn primary" @click="themeOpen = false">完成</button>
-        </div>
-      </div>
-    </div>
+          <VSlider
+            v-model="themeBlurModel"
+            color="primary"
+            label="玻璃虚化"
+            min="0"
+            max="40"
+            step="1"
+            thumb-label="always"
+            density="comfortable"
+            hide-details
+            class="mb-2"
+          />
+          <VSlider
+            v-model="themeOverlayModel"
+            color="primary"
+            :label="`暗色遮罩 ${Math.round(uiTheme.state.overlay * 100)}%`"
+            min="0"
+            max="0.7"
+            step="0.05"
+            thumb-label="always"
+            density="comfortable"
+            hide-details
+          />
+        </VCardText>
+        <VCardActions class="pa-4 pt-0">
+          <VSpacer />
+          <VBtn variant="tonal" @click="uiTheme.reset(); urlDraft = ''">恢复默认</VBtn>
+          <VBtn color="primary" @click="themeOpen = false">完成</VBtn>
+        </VCardActions>
+      </VCard>
+    </VDialog>
   </header>
 </template>
 
