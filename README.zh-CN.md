@@ -1,4 +1,5 @@
-# XRS
+# XRS ![github license](https://img.shields.io/github/license/:user/:repo) ![GitHub commit activity](https://img.shields.io/github/commit-activity/m/Copeq/XRS) ![GitHub commits since latest release](https://img.shields.io/github/commits-since/Copeq/XRS/latest)
+#     ![Language](https://img.shields.io/badge/language-c++-brightgreen)
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 

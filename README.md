@@ -1,6 +1,10 @@
-# XRS
+# XRS ![github license](https://img.shields.io/github/license/:user/:repo) ![GitHub commit activity](https://img.shields.io/github/commit-activity/m/Copeq/XRS) ![GitHub commits since latest release](https://img.shields.io/github/commits-since/Copeq/XRS/latest)
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+
+#     ![Language](https://img.shields.io/badge/language-c++-brightgreen)
+
+
+[English](REDME.md) | [简体中文](README.zh-CN.md)
 
 XRS is a fixed-station Remote ID (ASTM F3411 / OpenDroneID) Wi-Fi monitor built for Raspberry Pi and other Linux-based capture nodes. It passively listens for drone Remote ID broadcasts over Wi-Fi, decodes them in real time, and presents the results through a local web dashboard.
 
