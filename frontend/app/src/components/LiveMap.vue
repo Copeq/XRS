@@ -406,7 +406,13 @@ function applyDrones() {
         .addTo(map)
         .bindTooltip(tooltip, { sticky: true })
         .on("click", () => {
-          selectDrone(sn);
+          if (selectedSn === sn) {
+            // 再次点击同一图标：隐藏轨迹
+            selectedSn = "";
+            clearTrackLayer();
+          } else {
+            selectDrone(sn);
+          }
         });
       droneMarkers.set(sn, mk);
     }
