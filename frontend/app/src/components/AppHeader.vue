@@ -254,7 +254,6 @@ async function simStop() {
     <div class="header-main">
       <div class="brand">
         <h1>XRS</h1>
-        <span class="sub">{{ String(meta.base_name ?? "基站") }} · {{ state.ch || "ch?" }}</span>
       </div>
 
       <div class="header-right">
