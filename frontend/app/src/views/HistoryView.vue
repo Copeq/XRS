@@ -1,5 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import {
+  VAlert,
+  VBtn,
+  VBtnGroup,
+  VChip,
+  VProgressCircular,
+  VTable,
+  VTextField,
+} from "vuetify/components";
 import type { DroneRow } from "../composables/useLiveSocket";
 import { pageFetch } from "../composables/pageApi";
 import TrackMap, { type TrackPoint } from "../components/TrackMap.vue";
@@ -122,16 +131,39 @@ async function selectRow(sn: string) {
             <span class="count">{{ historyRows.length }}</span>
           </h2>
           <div class="toolbar">
-            <div class="scope">
-              <button :class="{ on: scope === 'all' }" type="button" @click="scope = 'all'">全部</button>
-              <button :class="{ on: scope === 'live' }" type="button" @click="scope = 'live'">实时</button>
-              <button :class="{ on: scope === 'hist' }" type="button" @click="scope = 'hist'">历史</button>
-            </div>
-            <input v-model="filterText" class="filter" type="search" placeholder="搜索 SN / 机型 / UAS ID" />
+            <VBtnGroup density="compact">
+              <VBtn
+                size="small"
+                :variant="scope === 'all' ? 'flat' : 'tonal'"
+                :color="scope === 'all' ? 'primary' : undefined"
+                @click="scope = 'all'"
+              >全部</VBtn>
+              <VBtn
+                size="small"
+                :variant="scope === 'live' ? 'flat' : 'tonal'"
+                :color="scope === 'live' ? 'primary' : undefined"
+                @click="scope = 'live'"
+              >实时</VBtn>
+              <VBtn
+                size="small"
+                :variant="scope === 'hist' ? 'flat' : 'tonal'"
+                :color="scope === 'hist' ? 'primary' : undefined"
+                @click="scope = 'hist'"
+              >历史</VBtn>
+            </VBtnGroup>
+            <VTextField
+              v-model="filterText"
+              density="compact"
+              variant="outlined"
+              hide-details
+              prepend-inner-icon="mdi-magnify"
+              placeholder="搜索 SN / 机型 / UAS ID"
+              class="filter-field"
+            />
           </div>
         </div>
         <div class="table-wrap">
-          <table>
+          <VTable density="compact" hover>
             <thead>
               <tr>
                 <th>#</th>
@@ -156,9 +188,9 @@ async function selectRow(sn: string) {
                 <td class="mono sn">{{ r.sn }}</td>
                 <td>{{ esc(r.model) }}</td>
                 <td>
-                  <span v-if="r.archived" class="badge arch">历史</span>
-                  <span v-else-if="r.lost" class="badge lost">离线</span>
-                  <span v-else class="badge live">实时</span>
+                  <VChip v-if="r.archived" size="x-small" variant="tonal" label>历史</VChip>
+                  <VChip v-else-if="r.lost" size="x-small" color="warning" variant="tonal" label>离线</VChip>
+                  <VChip v-else size="x-small" color="success" variant="tonal" label>实时</VChip>
                 </td>
                 <td>{{ rssiText(r.rssi) }}</td>
                 <td>{{ esc(r.pkts, "0") }}</td>
@@ -167,10 +199,10 @@ async function selectRow(sn: string) {
                 <td>{{ esc(r.last_seen) }}</td>
               </tr>
               <tr v-if="!historyRows.length">
-                <td colspan="9" class="empty-cell">无匹配记录</td>
+                <td colspan="9" class="text-center text-medium-emphasis py-6">无匹配记录</td>
               </tr>
             </tbody>
-          </table>
+          </VTable>
         </div>
       </section>
 
@@ -178,8 +210,18 @@ async function selectRow(sn: string) {
         <h2>详情
           <span v-if="selectedSn" class="mono detail-sn">{{ selectedSn }}</span>
         </h2>
-        <div v-if="detailBusy" class="detail-state">读取中…</div>
-        <div v-else-if="detailError" class="detail-state err">{{ detailError }}</div>
+        <div v-if="detailBusy" class="detail-state center">
+          <VProgressCircular indeterminate color="primary" size="22" />
+          <span>读取中…</span>
+        </div>
+        <VAlert
+          v-else-if="detailError"
+          type="error"
+          variant="tonal"
+          density="compact"
+          class="mx-3 my-3"
+          :text="detailError"
+        />
         <div v-else-if="detail" class="detail-body">
           <div class="detail-grid">
             <template v-for="[key, label] in detailFields" :key="key">
@@ -215,12 +257,24 @@ async function selectRow(sn: string) {
 }
 
 .panel {
-  border: 1px solid var(--border);
-  background: var(--card);
-  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) calc(var(--xrs-line-alpha, 1) * 100%), transparent);
+  background: color-mix(in srgb, var(--card) calc(var(--xrs-card-alpha, 1) * 100%), transparent);
+  -webkit-backdrop-filter: blur(var(--xrs-blur, 0px)) saturate(1.2);
+  backdrop-filter: blur(var(--xrs-blur, 0px)) saturate(1.2);
+  border-radius: 10px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+.filter-field {
+  max-width: 230px;
+}
+
+.detail-state.center {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .panel .panel-hdr {
