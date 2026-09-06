@@ -99,6 +99,11 @@ function goHardware() {
   emit("set-page", "hardware");
 }
 
+function clearSimulation() {
+  moreOpen.value = false;
+  void simStop();
+}
+
 /* 外观/背景主题 */
 const themeOpen = ref(false);
 const uiTheme = useUiTheme();
@@ -334,6 +339,7 @@ async function simStop() {
           </template>
           <VList density="compact" min-width="190">
             <VListItem prepend-icon="mdi-crosshairs-gps" title="模拟目标" @click="moreOpen = false; openSim()" />
+            <VListItem prepend-icon="mdi-broom" title="清除模拟目标" @click="clearSimulation" />
             <VListItem prepend-icon="mdi-text-box-outline" title="日志" @click="navTo('/logs')" />
             <VListItem prepend-icon="mdi-usb-flash-drive-outline" title="硬件助手" @click="goHardware" />
           </VList>
