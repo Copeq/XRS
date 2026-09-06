@@ -106,6 +106,23 @@ const snack = reactive({ show: false, text: "", error: false });
 /* 只读总览 */
 const overview = reactive<Dict>({});
 const ifaceOptions = ref<Array<{ title: string; value: string }>>([]);
+const lastPayloadJson = ref("");
+const configDirty = computed(() => JSON.stringify(buildVisualPayload()) !== lastPayloadJson.value);
+
+/* ------- 网卡绑定与 AP 热点 ------- */
+const NET_ROLE_FALLBACKS: Array<{ key: string; label: string }> = [
+  { key: "none", label: "None" },
+  { key: "scan", label: "扫描" },
+  { key: "web", label: "网页服务" },
+  { key: "ap_web", label: "AP热点网页服务" },
+  { key: "disabled", label: "禁用" },
+  { key: "idle", label: "闲置" },
+];
+const netRoles = ref<Array<Dict>>([...NET_ROLE_FALLBACKS]);
+const netIfaces = ref<Array<Dict>>([]);
+const netItems = ref<Array<Dict>>([]);
+const netAp = ref<Dict>({});
+const applyNet = ref("");
 const form = reactive<FormState>({
   iface: "",
   base_name: "",
@@ -301,6 +318,8 @@ async function load() {
       // no preferred binding yet: leave empty so the save warns user to bind NIC
     }
     applyVisual((view as Dict).visual as Dict);
+    initNetworkBindings(((bind as Dict).bindings as Dict) ?? {}, ifaces);
+    lastPayloadJson.value = JSON.stringify(buildVisualPayload());
     await loadRawTree();
     await loadMetrics();
     await loadRuntime();
@@ -336,118 +355,242 @@ function removeHook(i: number) {
   form.hooks.splice(i, 1);
 }
 
+function initNetworkBindings(bnd: Dict, ifaces: Array<Dict>) {
+  const ap0 = (bnd.ap ?? {}) as Dict;
+  netRoles.value = Array.isArray(bnd.roles) ? (bnd.roles as Array<Dict>) : [...NET_ROLE_FALLBACKS];
+  netIfaces.value = ifaces.slice();
+  const savedItems = Array.isArray(bnd.items) ? (bnd.items as Array<Dict>) : [];
+  const preferred = text(bnd.selected_iface ?? bnd.scan_iface ?? "", "");
+  netItems.value = netIfaces.value.map((it) => {
+    const name = text(it.name, "");
+    const saved = savedItems.find((x) => text(x.iface, "") === name);
+    const detected = text(it.detected_role, "");
+    return { iface: name, role: saved ? text(saved.role, "none") : name === preferred ? "scan" : detected || "none" };
+  });
+  netAp.value = Object.assign(
+    {
+      ssid: "XRS-HotSpot",
+      password: "",
+      address: "172.16.0.1",
+      cidr: "172.16.0.1/24",
+      dhcp_start: "172.16.0.20",
+      dhcp_end: "172.16.0.240",
+      http_port: 80,
+      channel: 6,
+      uplink_iface: "",
+      internet_enabled: false,
+    },
+    ap0
+  );
+  netAp.value.internet_enabled = !!text(netAp.value.uplink_iface, "");
+}
+
+function netRoleOf(iface: string): string {
+  const it = netItems.value.find((x) => text(x.iface, "") === iface);
+  return it ? text(it.role, "none") || "none" : "none";
+}
+function netIfaceMeta(it: Dict): string {
+  const meta: string[] = [];
+  if (text(it.model, "")) meta.push(`型号 ${text(it.model, "")}`);
+  if (text(it.driver, "")) meta.push(`驱动 ${text(it.driver, "")}`);
+  meta.push(it.is_wireless ? `无线 ${text(it.mode, "")}` : "有线");
+  if (it.admin_up === false) meta.push("已禁用");
+  if (text(it.state, "")) meta.push(`状态 ${text(it.state, "")}`);
+  if (Array.isArray(it.ipv4) && (it.ipv4 as Array<unknown>).length) meta.push((it.ipv4 as Array<unknown>).join(", "));
+  if (text(it.mac, "")) meta.push(text(it.mac, ""));
+  return meta.join(" · ");
+}
+function netUplinkTitle(it: Dict): string {
+  const name = text(it.name, "");
+  const kind = it.is_wireless ? "无线" : "有线";
+  const ip = Array.isArray(it.ipv4) && (it.ipv4 as Array<unknown>).length ? ` | ${(it.ipv4 as Array<unknown>).join(",")}` : "";
+  return name ? `${name} [${kind}${ip}]` : name;
+}
+function setNetRole(iface: string, val: unknown) {
+  const role = String(val ?? "none") || "none";
+  const entry = netItems.value.find((x) => text(x.iface, "") === iface);
+  if (role === "scan") {
+    netItems.value.forEach((x) => {
+      if (text(x.iface, "") !== iface && text(x.role, "") === "scan") x.role = "none";
+    });
+    if (entry) entry.role = "scan";
+    form.iface = iface;
+  } else {
+    if (entry) entry.role = role;
+    if (form.iface === iface) form.iface = "";
+  }
+}
+function collectNetworkBindings(): Dict {
+  const selected = text(form.iface, "").trim();
+  const items: Array<Dict> = [];
+  netItems.value.forEach((item) => {
+    const iface = text(item.iface, "");
+    const role = iface === selected ? "scan" : text(item.role, "") || "none";
+    items.push({ iface, role });
+  });
+  let scanSeen = false;
+  for (const item of items) {
+    if (String(item.role) === "scan") {
+      if (scanSeen) item.role = "none";
+      scanSeen = true;
+    }
+  }
+  const ap: Dict = Object.assign({}, netAp.value);
+  if (!text(ap.ssid, "").trim()) ap.ssid = "XRS-HotSpot";
+  ap.channel = Math.max(1, Math.min(196, Math.floor(num(ap.channel, 6) || 6)));
+  ap.http_port = Math.max(1, Math.min(65535, Math.floor(num(ap.http_port, 80) || 80)));
+  ap.uplink_iface = text(ap.uplink_iface, "").trim();
+  ap.internet_enabled = !!ap.uplink_iface;
+  return { items, ap };
+}
+function netApHttpSummary(): string {
+  return `${text(netAp.value.address, "172.16.0.1")}:${num(netAp.value.http_port, 80)}`;
+}
+
+function buildVisualPayload(): Dict {
+  const iface = text(form.iface, "").trim();
+  const basic: Dict = { iface };
+  if (form.fixed_channel) basic.channel = num(form.channel, 6);
+  else basic.channel = null;
+  basic.lost_timeout = num(form.lost_timeout, 15);
+  basic.min_gap = num(form.min_gap, 0.5);
+  for (const k of ["hop", "hop_5g", "scan_wifi_fast", "auto_self_heal", "change_on_rssi", "change_on_payload", "debug"]) {
+    basic[k] = !!form[k as keyof FormState];
+  }
+  basic.dwell_2g = num(form.dwell_2g, 300);
+  basic.dwell_5g = num(form.dwell_5g, 300);
+  basic.settle = num(form.settle, 50);
+  basic.dwell_on_hit = num(form.dwell_on_hit, 2500);
+  basic.hit_cap = num(form.hit_cap, 6000);
+  basic.rssi_delta = num(form.rssi_delta, 3);
+  basic.time = num(form.time, 1);
+  basic.track_points_limit = num(form.track_points_limit, 10000);
+  const web: Dict = {
+    base_name: text(form.base_name, "基站"),
+    base_zoom: num(form.base_zoom, 13),
+    heading_ref_deg: num(form.heading_ref_deg, 0),
+    dji_lookup_url: text(form.dji_lookup_url, ""),
+    map_tile_url: text(form.map_tile_url, ""),
+    map_tile_subdomains: text(form.map_tile_subdomains, ""),
+    map_tile_attribution: text(form.map_tile_attribution, ""),
+    map_tile_max_native_zoom: num(form.map_tile_max_native_zoom, 18),
+  };
+  const latS = text(form.base_lat, "").trim();
+  const lonS = text(form.base_lon, "").trim();
+  if (latS || lonS) {
+    web.base_lat = Number(latS);
+    web.base_lon = Number(lonS);
+  }
+  web.access_list_enabled = form.access_enabled;
+  web.access_list_mode = form.access_mode;
+  web.access_list = [...form.access_list].map((x) => x.trim()).filter(Boolean);
+  web.alarm_zones = form.alarm_zones.map((z, i) => {
+    const raw = [z.lat1, z.lon1, z.lat2, z.lon2].map((v) => {
+      const s = String(v ?? "").trim();
+      return s === "" ? null : Number(s);
+    });
+    return {
+      enabled: !!z.enabled,
+      name: z.name.trim() || `报警区域 ${i + 1}`,
+      lat1: raw[0],
+      lon1: raw[1],
+      lat2: raw[2],
+      lon2: raw[3],
+    };
+  });
+  const notifyPayload: Dict = {
+    enabled: form.notify_enabled,
+    notify_reonline: form.notify_reonline,
+    reonline_cooldown_sec: num(form.reonline_cooldown_sec, 300),
+    send_timeout_sec: num(form.send_timeout_sec, 8),
+    wecom_webhooks: form.hooks.map((h, i) => ({
+      index: h.index >= 0 ? h.index : i,
+      name: h.name.trim() || `通道 ${i + 1}`,
+      enabled: h.enabled,
+      key: h.key.trim(),
+    })),
+  };
+  const apiPayload: Dict = {
+    enabled: form.api_enabled,
+    whitelist_enabled: form.api_whitelist_enabled,
+    whitelist_mode: form.api_whitelist_mode,
+    whitelist: [...form.api_whitelist].map((x) => x.trim()).filter(Boolean),
+  };
+  const loginMethods: string[] = [];
+  if (form.login_password) loginMethods.push("password");
+  if (form.login_passkey) loginMethods.push("passkey");
+  const usernameRaw = text(form.auth_username, "").trim();
+  const passwordRaw = form.auth_password;
+  const authPayload: Dict = {
+    enabled: form.auth_enabled,
+    realm: text(form.auth_realm, "XRS"),
+    session_ttl_min: num(form.auth_ttl, 30),
+    login_methods: loginMethods.length ? loginMethods : ["password"],
+  };
+  if (usernameRaw) authPayload.username = usernameRaw;
+  if (passwordRaw) authPayload.password = passwordRaw;
+  const metricsPayload: Dict = {
+    enabled: form.metrics_enabled,
+    retention_days: num(form.metrics_retention, 7),
+    temperature_source: text(form.metrics_temp, "auto"),
+  };
+  const modelPayload: Dict = {
+    enabled: form.model_enabled,
+    url: text(form.model_url, ""),
+  };
+  return {
+    basic,
+    web,
+    notify: notifyPayload,
+    api: apiPayload,
+    auth: authPayload,
+    metrics: metricsPayload,
+    model_update: modelPayload,
+    network_bindings: collectNetworkBindings(),
+  };
+}
+
 async function save() {
   saving.value = true;
   try {
-    const iface = text(form.iface, "").trim();
-    const basic: Dict = { iface };
-    if (form.fixed_channel) basic.channel = num(form.channel, 6);
-    else basic.channel = null;
-    basic.lost_timeout = num(form.lost_timeout, 15);
-    basic.min_gap = num(form.min_gap, 0.5);
-    for (const k of ["hop", "hop_5g", "scan_wifi_fast", "auto_self_heal", "change_on_rssi", "change_on_payload", "debug"]) {
-      basic[k] = !!form[k as keyof FormState];
-    }
-    basic.dwell_2g = num(form.dwell_2g, 300);
-    basic.dwell_5g = num(form.dwell_5g, 300);
-    basic.settle = num(form.settle, 50);
-    basic.dwell_on_hit = num(form.dwell_on_hit, 2500);
-    basic.hit_cap = num(form.hit_cap, 6000);
-    basic.rssi_delta = num(form.rssi_delta, 3);
-    basic.time = num(form.time, 1);
-    basic.track_points_limit = num(form.track_points_limit, 10000);
-    const web: Dict = {
-      base_name: text(form.base_name, "基站"),
-      base_zoom: num(form.base_zoom, 13),
-      heading_ref_deg: num(form.heading_ref_deg, 0),
-      dji_lookup_url: text(form.dji_lookup_url, ""),
-      map_tile_url: text(form.map_tile_url, ""),
-      map_tile_subdomains: text(form.map_tile_subdomains, ""),
-      map_tile_attribution: text(form.map_tile_attribution, ""),
-      map_tile_max_native_zoom: num(form.map_tile_max_native_zoom, 18),
-    };
-    const latS = text(form.base_lat, "").trim();
-    const lonS = text(form.base_lon, "").trim();
-    if (latS || lonS) {
-      web.base_lat = Number(latS);
-      web.base_lon = Number(lonS);
-    }
-    web.access_list_enabled = form.access_enabled;
-    web.access_list_mode = form.access_mode;
-    web.access_list = [...form.access_list].map((x) => x.trim()).filter(Boolean);
-    web.alarm_zones = form.alarm_zones.map((z, i) => {
-      const raw = [z.lat1, z.lon1, z.lat2, z.lon2].map((v) => {
-        const s = String(v ?? "").trim();
-        return s === "" ? null : Number(s);
-      });
-      return {
-        enabled: !!z.enabled,
-        name: z.name.trim() || `报警区域 ${i + 1}`,
-        lat1: raw[0],
-        lon1: raw[1],
-        lat2: raw[2],
-        lon2: raw[3],
-      };
-    });
-    const notifyPayload: Dict = {
-      enabled: form.notify_enabled,
-      notify_reonline: form.notify_reonline,
-      reonline_cooldown_sec: num(form.reonline_cooldown_sec, 300),
-      send_timeout_sec: num(form.send_timeout_sec, 8),
-      wecom_webhooks: form.hooks.map((h, i) => ({
-        index: h.index >= 0 ? h.index : i,
-        name: h.name.trim() || `通道 ${i + 1}`,
-        enabled: h.enabled,
-        key: h.key.trim(),
-      })),
-    };
-    const apiPayload: Dict = {
-      enabled: form.api_enabled,
-      whitelist_enabled: form.api_whitelist_enabled,
-      whitelist_mode: form.api_whitelist_mode,
-      whitelist: [...form.api_whitelist].map((x) => x.trim()).filter(Boolean),
-    };
-    const loginMethods: string[] = [];
-    if (form.login_password) loginMethods.push("password");
-    if (form.login_passkey) loginMethods.push("passkey");
-    const usernameRaw = text(form.auth_username, "").trim();
-    const passwordRaw = form.auth_password;
-    const authPayload: Dict = {
-      enabled: form.auth_enabled,
-      realm: text(form.auth_realm, "XRS"),
-      session_ttl_min: num(form.auth_ttl, 30),
-      login_methods: loginMethods.length ? loginMethods : ["password"],
-    };
-    if (usernameRaw) authPayload.username = usernameRaw;
-    if (passwordRaw) authPayload.password = passwordRaw;
-    const metricsPayload: Dict = {
-      enabled: form.metrics_enabled,
-      retention_days: num(form.metrics_retention, 7),
-      temperature_source: text(form.metrics_temp, "auto"),
-    };
-    const modelPayload: Dict = {
-      enabled: form.model_enabled,
-      url: text(form.model_url, ""),
-    };
-    const d = (await postJson("/api/settings/visual/save", {
-      basic,
-      web,
-      notify: notifyPayload,
-      api: apiPayload,
-      auth: authPayload,
-      metrics: metricsPayload,
-      model_update: modelPayload,
-    })) as Dict;
+    const payload = buildVisualPayload();
+    const d = (await postJson("/api/settings/visual/save", payload)) as Dict;
     if (d.ok === false) {
       notify(text(d.error, "保存失败"), true);
       return;
     }
+    lastPayloadJson.value = JSON.stringify(payload);
     notify(d.reload_msg ? `已保存：${text(d.reload_msg)}` : "已保存", false);
     await load();
   } catch (e) {
     notify(e instanceof Error ? e.message : String(e), true);
   } finally {
     saving.value = false;
+  }
+}
+
+async function applyNetworkBindings() {
+  if (configDirty.value) {
+    notify("设置尚未保存。请先点击「保存设置」，再应用网卡绑定。", true);
+    return;
+  }
+  const ok = window.confirm("将按已保存配置调整网卡角色、AP 地址、hostapd 与内置 DHCP。继续？");
+  if (!ok) return;
+  toolBusy.value = "net-apply";
+  applyNet.value = "";
+  try {
+    const d = (await postJson("/api/network-bindings/apply", { confirm: true })) as Dict;
+    const lines: string[] = [];
+    (Array.isArray(d.steps) ? (d.steps as Array<Dict>) : []).forEach((s) => {
+      lines.push(`${s.ok ? "OK  " : "FAIL "}${text(s.label, "")}${text(s.output, "") ? ` | ${text(s.output, "")}` : ""}`);
+    });
+    applyNet.value = lines.join("\n") || (d.ok ? "已应用网卡绑定。" : "未返回执行步骤。");
+    notify(d.ok === false ? text(d.error, "应用失败") : applyNet.value || "网卡绑定已应用。", d.ok === false);
+  } catch (e) {
+    applyNet.value = e instanceof Error ? e.message : String(e);
+    notify(applyNet.value, true);
+  } finally {
+    toolBusy.value = "";
   }
 }
 
@@ -857,6 +1000,66 @@ onMounted(() => {
             <VTextField v-model.number="form.lost_timeout" label="离线判定(s)" type="number" min="1" density="compact" variant="outlined" hide-details />
             <VTextField v-model.number="form.min_gap" label="最小间隔(s)" type="number" min="0" step="0.1" density="compact" variant="outlined" hide-details />
           </div>
+        </section>
+
+        <!-- 网卡绑定与 AP 热点 -->
+        <section class="st-card st-wide">
+          <h2>网卡绑定与 AP 热点</h2>
+          <VChip variant="tonal" label class="mb-2">
+            保存设置后，可在下方“应用到系统”真正调整网卡角色与 AP 热点（需 root 权限）。
+          </VChip>
+          <div v-if="!netIfaces.length" class="muted-note mb-2">未检测到网卡</div>
+          <div v-else v-for="row in netIfaces" :key="text(row.name, '')" class="bind-row">
+            <div class="bind-iface mono">{{ text(row.name, "") }}</div>
+            <div class="bind-meta">{{ netIfaceMeta(row) }}</div>
+            <VSelect
+              :model-value="netRoleOf(text(row.name, ''))"
+              :items="netRoles"
+              item-title="label"
+              item-value="key"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="bind-role"
+              @update:model-value="setNetRole(text(row.name, ''), $event)"
+            />
+          </div>
+          <VDivider class="my-3" />
+          <div class="text-caption text-medium-emphasis mb-1">AP 热点参数（随配置保存生效）</div>
+          <div class="ap-grid mb-1">
+            <VTextField v-model="netAp.ssid" label="SSID" density="compact" variant="outlined" hide-details />
+            <VTextField v-model="netAp.password" label="密码（留空为开放热点）" type="password" density="compact" variant="outlined" hide-details />
+            <VTextField v-model.number="netAp.channel" label="信道" type="number" min="1" max="196" density="compact" variant="outlined" hide-details />
+            <VSelect
+              v-model="netAp.uplink_iface"
+              label="桥接出口（不共享 Internet）"
+              :items="[{ title: '不共享 Internet', value: '' }, ...netIfaces.map((it) => ({ title: netUplinkTitle(it), value: text(it.name, '') }))]"
+              item-title="title"
+              item-value="value"
+              density="compact"
+              variant="outlined"
+              hide-details
+            />
+          </div>
+          <div class="d-flex flex-wrap ga-2 mb-3">
+            <VChip variant="tonal" label class="mono">AP 地址 {{ netAp.address || "172.16.0.1" }}</VChip>
+            <VChip variant="tonal" label class="mono">网段 {{ netAp.cidr || "172.16.0.1/24" }}</VChip>
+            <VChip variant="tonal" label class="mono">DHCP {{ netAp.dhcp_start || "172.16.0.20" }} - {{ netAp.dhcp_end || "172.16.0.240" }}</VChip>
+            <VChip variant="tonal" label class="mono">网页服务 http://{{ netApHttpSummary() }}</VChip>
+          </div>
+          <div class="d-flex align-center ga-2">
+            <div class="flex-spacer" />
+            <VBtn
+              size="small"
+              color="warning"
+              variant="tonal"
+              :loading="toolBusy === 'net-apply'"
+              @click="applyNetworkBindings"
+            >
+              保存设置后再应用到系统
+            </VBtn>
+          </div>
+          <pre v-if="applyNet" class="log-box mt-2">{{ applyNet }}</pre>
         </section>
 
         <!-- 基站与地图 -->
@@ -1307,6 +1510,41 @@ onMounted(() => {
   font-size: 11px;
   overflow-wrap: anywhere;
   word-break: break-all;
+}
+
+.bind-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+}
+
+.bind-iface {
+  width: 150px;
+  flex: none;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bind-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: color-mix(in srgb, var(--txt) 72%, transparent);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.bind-role {
+  width: 210px;
+  flex: none;
+}
+
+.ap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
 }
 
 .metric-select {
