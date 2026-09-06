@@ -4,6 +4,7 @@ import {
   VAlert,
   VBtn,
   VChip,
+  VDivider,
   VProgressCircular,
   VSelect,
   VSnackbar,
@@ -242,6 +243,7 @@ function applyVisual(visual: Dict) {
   form.api_whitelist_enabled = !!ap.whitelist_enabled;
   form.api_whitelist_mode = text(ap.whitelist_mode, "allow");
   form.api_whitelist = Array.isArray(ap.whitelist) ? (ap.whitelist as Array<unknown>).map((x) => text(x, "").trim()).filter(Boolean) : [];
+  tokens.value = Array.isArray(ap.tokens) ? (ap.tokens as Array<Dict>) : [];
   /* 鉴权 */
   const at = (visual.auth ?? {}) as Dict;
   form.auth_enabled = !!at.enabled;
@@ -445,6 +447,164 @@ async function save() {
   }
 }
 
+/* ------- Token 管理 ------- */
+const tokens = ref<Array<Dict>>([]);
+const tokenName = ref("");
+const tokenUser = ref("");
+const tokenPass = ref("");
+const tokenSecret = ref("");
+const toolBusy = ref("");
+
+async function refreshTokensFromView() {
+  try {
+    const d = (await pageFetch("/api/settings/view")) as Dict;
+    const visual = (d.visual as Dict) ?? {};
+    const api = (visual.api as Dict) ?? {};
+    tokens.value = Array.isArray(api.tokens) ? (api.tokens as Array<Dict>) : [];
+  } catch (_e) {
+    /* ignore */
+  }
+}
+
+async function createToken() {
+  toolBusy.value = "token";
+  tokenSecret.value = "";
+  try {
+    const r = (await postJson("/api/settings/api-token/create", {
+      name: text(tokenName, "").trim(),
+      username: text(tokenUser, "").trim(),
+      password: tokenPass,
+    })) as Dict;
+    if (r.ok === false) {
+      notify(text(r.error, "创建失败"), true);
+      return;
+    }
+    tokenSecret.value = text(r.token, "");
+    tokens.value = Array.isArray(r.tokens) ? (r.tokens as Array<Dict>) : tokens.value;
+    tokenName.value = "";
+    tokenPass.value = "";
+    notify("已创建 Token，请立即复制保存", false);
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  } finally {
+    toolBusy.value = "";
+  }
+}
+
+async function deleteToken(id: string) {
+  try {
+    const r = (await postJson("/api/settings/api-token/delete", { id })) as Dict;
+    if (r.ok === false) {
+      notify(text(r.error, "删除失败"), true);
+      return;
+    }
+    tokens.value = Array.isArray(r.tokens) ? (r.tokens as Array<Dict>) : [];
+    notify("Token 已删除", false);
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  }
+}
+
+async function copyTokenSecret() {
+  try {
+    await navigator.clipboard.writeText(tokenSecret.value);
+    notify("已复制到剪贴板", false);
+  } catch (_e) {
+    notify("复制失败，请手动选中复制", true);
+  }
+}
+
+/* ------- 导入 / 导出 ------- */
+async function exportData(kind: "settings" | "scan") {
+  toolBusy.value = `export-${kind}`;
+  try {
+    const url = kind === "settings" ? "/api/settings/export/settings" : "/api/settings/export/scan-data";
+    const d = (await pageFetch(url)) as Dict;
+    const fileName = kind === "settings" ? `xrs-settings-${Date.now()}.json` : `xrs-scan-data-${Date.now()}.json`;
+    const blob = new Blob([JSON.stringify(d, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    notify(`已导出：${fileName}`, false);
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  } finally {
+    toolBusy.value = "";
+  }
+}
+
+const importSettingsInput = ref<HTMLInputElement | null>(null);
+const importScanInput = ref<HTMLInputElement | null>(null);
+function pickImport(kind: "settings" | "scan") {
+  if (kind === "settings") importSettingsInput.value?.click();
+  else importScanInput.value?.click();
+}
+
+async function importFile(kind: "settings" | "scan", ev: Event) {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  toolBusy.value = `import-${kind}`;
+  try {
+    const raw = await file.text();
+    const payload = JSON.parse(raw);
+    const body: Dict = { payload };
+    if (kind === "scan") body.mode = "merge";
+    const url = kind === "settings" ? "/api/settings/import/settings" : "/api/settings/import/scan-data";
+    const r = (await postJson(url, body)) as Dict;
+    if (r.ok === false) {
+      notify(text(r.error, "导入失败"), true);
+      return;
+    }
+    notify(`导入成功${r.reload_msg ? `：${text(r.reload_msg)}` : ""}`, false);
+    await load();
+  } catch (e) {
+    notify(e instanceof Error ? e.message : `JSON 解析失败：${String(e)}`, true);
+  } finally {
+    toolBusy.value = "";
+  }
+}
+
+/* ------- 维护工具 ------- */
+async function maintenance(op: "reidentify" | "systemd" | "iw" | "security" | "models") {
+  if (op === "reidentify") {
+    const ok = window.confirm("对最近记录重新执行机型/SN 识别？");
+    if (!ok) return;
+  } else if (op === "systemd" || op === "iw" || op === "security") {
+    const label = op === "systemd" ? "注册为 systemd 服务" : op === "iw" ? "安装无线工具(iw)" : "修复运行权限/安全项";
+    const ok = window.confirm(`执行「${label}」？（可能需要 root/管理员权限）`);
+    if (!ok) return;
+  }
+  toolBusy.value = op;
+  try {
+    let r: Dict;
+    if (op === "reidentify") {
+      r = (await postJson("/api/settings/history/reidentify-recent", { limit: 100 })) as Dict;
+      notify(r.ok === false ? text(r.error, "执行失败") : text(r.summary ?? "re-identify 完成"), r.ok === false);
+    } else if (op === "models") {
+      r = (await postJson("/api/settings/models/update", { url: text(form.model_url, "") })) as Dict;
+      const modelState = r.state && typeof r.state === "object" ? (r.state as Dict) : null;
+      const modelMsg = r.ok === false ? text(r.error, "更新失败") : text(modelState?.message ?? "机型库在线更新完成", "更新完成");
+      notify(modelMsg, r.ok === false);
+    } else {
+      const urlMap: Dict = { systemd: "/api/settings/systemd/register", iw: "/api/settings/iw/install", security: "/api/settings/security/repair" };
+      r = (await postJson(String(urlMap[op]), { confirm: true })) as Dict;
+      const msg = text(r.message ?? (r.ok ? "操作成功" : r.error), "");
+      notify(msg, r.ok === false);
+    }
+    await refreshTokensFromView();
+  } catch (e) {
+    notify(e instanceof Error ? e.message : String(e), true);
+  } finally {
+    toolBusy.value = "";
+  }
+}
+
 function openAdvanced() {
   window.open("/settings?standalone=1", "_blank", "noopener,noreferrer");
 }
@@ -456,6 +616,20 @@ onMounted(() => {
 
 <template>
   <div class="settings-native">
+    <input
+      ref="importSettingsInput"
+      type="file"
+      accept=".json,application/json"
+      class="hidden-file"
+      @change="importFile('settings', $event)"
+    />
+    <input
+      ref="importScanInput"
+      type="file"
+      accept=".json,application/json"
+      class="hidden-file"
+      @change="importFile('scan', $event)"
+    />
     <div v-if="loading" class="loading-wrap">
       <VProgressCircular indeterminate color="primary" size="26" />
       <span>读取设置…</span>
@@ -579,6 +753,34 @@ onMounted(() => {
             <VBtn icon="mdi-delete-outline" size="small" variant="text" @click="removeApiEntry(i)" />
           </div>
           <VBtn size="small" variant="outlined" color="primary" @click="addApiEntry">添加地址</VBtn>
+
+          <VDivider class="my-3" />
+          <div class="text-caption text-medium-emphasis mb-1">Token 列表</div>
+          <div v-if="!tokens.length" class="muted-note mb-2">暂无 Token</div>
+          <div v-for="t in tokens" :key="text(t.id)" class="d-flex align-center ga-2 mb-1">
+            <VChip size="x-small" variant="tonal" label :color="t.active ? 'success' : 'default'">
+              {{ t.enabled ? "启用" : "停用" }}
+            </VChip>
+            <span class="mono token-name">{{ text(t.name) }}</span>
+            <span class="muted-note token-id mono">{{ text(t.id).slice(0, 10) }}…</span>
+            <VBtn icon="mdi-delete-outline" size="x-small" variant="text" @click="deleteToken(String(t.id))" />
+          </div>
+
+          <VDivider class="my-3" />
+          <div class="text-caption text-medium-emphasis mb-1">创建新 Token（需网页登录已启用并填写账号密码）</div>
+          <div class="d-flex ga-2 mb-2">
+            <VTextField v-model="tokenName" label="名称(可选)" density="compact" variant="outlined" hide-details />
+            <VTextField v-model="tokenUser" label="网页账号" density="compact" variant="outlined" hide-details />
+            <VTextField v-model="tokenPass" label="网页密码" type="password" density="compact" variant="outlined" hide-details />
+          </div>
+          <VBtn size="small" color="primary" :loading="toolBusy === 'token'" @click="createToken">创建 Token</VBtn>
+          <VAlert v-if="tokenSecret" type="success" variant="tonal" class="mt-2">
+            <div class="d-flex align-center ga-2">
+              <code class="mono token-secret">{{ tokenSecret }}</code>
+              <VBtn size="x-small" variant="outlined" @click="copyTokenSecret">复制</VBtn>
+            </div>
+            <div class="muted-note mt-1">Token 只显示这一次，请立即保存。</div>
+          </VAlert>
         </section>
 
         <!-- 鉴权 -->
@@ -677,6 +879,31 @@ onMounted(() => {
             <VTextField v-model="hook.key" label="Webhook Key（留空保持现有密钥）" density="compact" variant="outlined" hide-details />
           </div>
           <VBtn size="small" variant="outlined" color="primary" @click="addHook">添加通道</VBtn>
+        </section>
+
+        <!-- 数据与维护 -->
+        <section class="st-card st-wide">
+          <h2>数据与维护</h2>
+          <div class="text-caption text-medium-emphasis mb-1">备份 / 恢复</div>
+          <div class="d-flex flex-wrap ga-2 mb-3">
+            <VBtn size="small" variant="outlined" :loading="toolBusy === 'export-settings'" @click="exportData('settings')">导出设置</VBtn>
+            <VBtn size="small" variant="outlined" :loading="toolBusy === 'export-scan'" @click="exportData('scan')">导出扫描数据</VBtn>
+            <VBtn size="small" variant="tonal" :loading="toolBusy === 'import-settings'" @click="pickImport('settings')">导入设置…</VBtn>
+            <VBtn size="small" variant="tonal" :loading="toolBusy === 'import-scan'" @click="pickImport('scan')">导入扫描数据(合并)…</VBtn>
+            <VChip variant="outlined" label class="ml-1">设置/扫描数据 导出为 JSON，可在本页或旧版页面导入</VChip>
+          </div>
+
+          <div class="text-caption text-medium-emphasis mb-1">维护操作</div>
+          <div class="d-flex flex-wrap ga-2 mb-3">
+            <VBtn size="small" color="primary" :loading="toolBusy === 'models'" @click="maintenance('models')">机型库在线更新</VBtn>
+            <VBtn size="small" variant="outlined" :loading="toolBusy === 'reidentify'" @click="maintenance('reidentify')">最近记录重新识别</VBtn>
+            <VBtn size="small" variant="tonal" :loading="toolBusy === 'systemd'" @click="maintenance('systemd')">注册 systemd 服务</VBtn>
+            <VBtn size="small" variant="tonal" :loading="toolBusy === 'iw'" @click="maintenance('iw')">安装无线工具(iw)</VBtn>
+            <VBtn size="small" color="warning" variant="tonal" :loading="toolBusy === 'security'" @click="maintenance('security')">修复运行权限/安全项</VBtn>
+          </div>
+          <VChip variant="tonal" label>
+            提示：import 只接受本站导出格式；导入设置会先备份当前配置，失败自动回滚。
+          </VChip>
         </section>
       </div>
 
@@ -784,6 +1011,32 @@ onMounted(() => {
 .muted-note {
   color: var(--muted);
   font-size: 12px;
+}
+
+.hidden-file {
+  display: none;
+}
+
+.st-card.st-wide {
+  grid-column: 1 / -1;
+}
+
+.token-name {
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.token-id {
+  margin-left: auto;
+}
+
+.token-secret {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .st-actions {
