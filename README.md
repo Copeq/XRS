@@ -1,5 +1,5 @@
 # XRS ![GitHub license](https://img.shields.io/github/license/Copeq/XRS) ![GitHub commit activity](https://img.shields.io/github/commit-activity/m/Copeq/XRS) ![GitHub stars](https://img.shields.io/github/stars/Copeq/XRS)
-#     ![Language](https://img.shields.io/badge/language-c++-brightgreen)
+#     ![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white) ![Vue](https://img.shields.io/badge/Vue-42B883?logo=vue.js&logoColor=white) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
 
 
 [English](README.md) | [简体中文](README.zh-CN.md)
