@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import {
   VAlert,
   VBtn,
@@ -1345,6 +1345,77 @@ async function confirmAuUpload() {
   }
 }
 
+/* ------- 终端弹窗：显示 systemctl/iw/修复 等命令输出 ------- */
+interface ConsoleLine {
+  kind: "cmd" | "info" | "out" | "err" | "ok" | "fail";
+  text: string;
+}
+const consoleOpen = ref(false);
+const consoleTitle = ref("");
+const consoleLines = ref<Array<ConsoleLine>>([]);
+const consoleBusy = ref(false);
+const consoleBody = ref<HTMLElement | null>(null);
+watch(
+  () => consoleLines.value.length,
+  () => {
+    void nextTick(() => {
+      const el = consoleBody.value;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+  },
+);
+
+function appendConsole(kind: ConsoleLine["kind"], text: string) {
+  consoleLines.value.push({ kind, text });
+}
+function clearConsole() {
+  consoleLines.value = [];
+}
+
+async function runWithConsole(op: "systemd" | "iw" | "security") {
+  const map: Dict = {
+    systemd: "/api/settings/systemd/register",
+    iw: "/api/settings/iw/install",
+    security: "/api/settings/security/repair",
+  };
+  const labels: Dict = {
+    systemd: "注册/更新 systemd 服务",
+    iw: "安装无线工具(iw / hostapd)",
+    security: "修复运行权限/安全项",
+  };
+  const label = String(labels[op]);
+  consoleTitle.value = label;
+  clearConsole();
+  consoleOpen.value = true;
+  consoleBusy.value = true;
+  try {
+    appendConsole("cmd", `$ ${label}（确认中…）`);
+    const d = (await postJson(String(map[op]), { confirm: true })) as Dict;
+    if (Array.isArray(d.steps)) {
+      for (const s of d.steps as Array<Dict>) {
+        const lbl = text(s.label, "");
+        const out = text(s.output, "");
+        const ok = s.ok !== false;
+        appendConsole(ok ? "out" : "err", `▶ ${lbl}${out ? `\n${out}` : ""}`);
+      }
+    } else if (text(d.output, "")) {
+      appendConsole("out", text(d.output, ""));
+    }
+    if (d.ok) {
+      appendConsole("ok", "执行完成 ✓");
+      notify(`${label} 完成`, false);
+    } else {
+      appendConsole("fail", `失败：${text(d.error, "")}`);
+      notify(text(d.error, "操作失败"), true);
+    }
+  } catch (e) {
+    appendConsole("err", `错误：${e instanceof Error ? e.message : String(e)}`);
+    notify(e instanceof Error ? e.message : String(e), true);
+  } finally {
+    consoleBusy.value = false;
+  }
+}
+
 async function maintenance(op: "reidentify" | "systemd" | "iw" | "security" | "models") {
   if (op === "reidentify") {
     const ok = window.confirm("对最近记录重新执行机型/SN 识别？");
@@ -2027,9 +2098,9 @@ onMounted(() => {
           <pre v-if="serviceMsg" class="log-box mb-2">{{ serviceMsg }}</pre>
           <div class="d-flex flex-wrap ga-2">
             <VBtn size="small" variant="tonal" :loading="toolBusy === 'svc-refresh'" @click="refreshServiceStatus">刷新服务状态</VBtn>
-            <VBtn size="small" variant="outlined" :loading="toolBusy === 'systemd'" @click="maintenance('systemd')">注册/更新服务</VBtn>
-            <VBtn size="small" variant="tonal" :loading="toolBusy === 'iw'" @click="maintenance('iw')">安装无线工具</VBtn>
-            <VBtn size="small" color="warning" variant="tonal" :loading="toolBusy === 'security'" @click="maintenance('security')">修复运行权限</VBtn>
+            <VBtn size="small" variant="outlined" :loading="consoleBusy" @click="runWithConsole('systemd')">注册/更新服务</VBtn>
+            <VBtn size="small" variant="tonal" :loading="consoleBusy" @click="runWithConsole('iw')">安装无线工具</VBtn>
+            <VBtn size="small" color="warning" variant="tonal" :loading="consoleBusy" @click="runWithConsole('security')">修复运行权限</VBtn>
           </div>
         </section>
 
@@ -2228,9 +2299,9 @@ onMounted(() => {
           <div class="d-flex flex-wrap ga-2 mb-3">
             <VBtn size="small" color="primary" :loading="toolBusy === 'models'" @click="maintenance('models')">机型库在线更新</VBtn>
             <VBtn size="small" variant="outlined" :loading="toolBusy === 'reidentify'" @click="maintenance('reidentify')">最近记录重新识别</VBtn>
-            <VBtn size="small" variant="tonal" :loading="toolBusy === 'systemd'" @click="maintenance('systemd')">注册 systemd 服务</VBtn>
-            <VBtn size="small" variant="tonal" :loading="toolBusy === 'iw'" @click="maintenance('iw')">安装无线工具(iw)</VBtn>
-            <VBtn size="small" color="warning" variant="tonal" :loading="toolBusy === 'security'" @click="maintenance('security')">修复运行权限/安全项</VBtn>
+            <VBtn size="small" variant="tonal" :loading="consoleBusy" @click="runWithConsole('systemd')">注册 systemd 服务</VBtn>
+            <VBtn size="small" variant="tonal" :loading="consoleBusy" @click="runWithConsole('iw')">安装无线工具(iw)</VBtn>
+            <VBtn size="small" color="warning" variant="tonal" :loading="consoleBusy" @click="runWithConsole('security')">修复运行权限/安全项</VBtn>
           </div>
           <VChip variant="tonal" label>
             提示：import 只接受本站导出格式；导入设置会先备份当前配置，失败自动回滚。
@@ -2322,6 +2393,25 @@ onMounted(() => {
       {{ snack.text }}
     </VSnackbar>
   </div>
+
+  <!-- 执行终端弹窗：显示命令运行的逐步输出 -->
+  <Teleport to="body">
+    <div v-if="consoleOpen" class="console-mask" @click.self="consoleOpen = false">
+      <div class="console-card">
+        <div class="console-head">
+          <strong>执行进程</strong>
+          <span class="muted">{{ consoleTitle }}</span>
+          <div class="flex-spacer" />
+          <VBtn size="x-small" variant="text" icon="mdi-close" @click="consoleOpen = false" />
+        </div>
+        <pre ref="consoleBody" class="console-body"><span v-for="(l, i) in consoleLines" :key="i" :class="['console-line', `console-${l.kind}`]">{{ l.text }}</span></pre>
+        <div class="console-foot">
+          <span class="muted-note">{{ consoleBusy ? "执行中…可关闭弹窗稍后再打开查看历史" : "执行完成" }}</span>
+          <VBtn size="small" variant="tonal" @click="consoleOpen = false">关闭</VBtn>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -2500,6 +2590,83 @@ onMounted(() => {
 .log-box {
   margin: 0;
   max-height: 240px;
+}
+
+.console-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  z-index: 10000;
+}
+
+.console-card {
+  width: min(680px, 96vw);
+  max-height: calc(100vh - 48px);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.console-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.console-body {
+  max-height: min(60vh, 520px);
+  overflow: auto;
+  background: #0d1117;
+  color: #d6e0ee;
+  font: 12px/1.5 var(--mono);
+  padding: 10px;
+  border-radius: 8px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.console-line {
+  display: block;
+  padding: 1px 0;
+}
+
+.console-line.console-cmd {
+  color: #82d4ff;
+  font-weight: 600;
+}
+
+.console-line.console-out {
+  color: #d6e0ee;
+}
+
+.console-line.console-err {
+  color: #ff7b72;
+}
+
+.console-line.console-ok {
+  color: #56d364;
+  font-weight: 600;
+}
+
+.console-line.console-fail {
+  color: #ff7b72;
+  font-weight: 600;
+}
+
+.console-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.log-box {
   overflow: auto;
   padding: 10px;
   border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
