@@ -58,13 +58,15 @@ def http_server_thread() -> None:
                 )
                 self._auth_clear_cookie = False
             self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("X-Frame-Options", "DENY")
+            # 不限制页面被 iframe 嵌入：站内 SPA 以 iframe 承载设置页，IDE/内嵌预览的
+            # 祖先非同源，SAMEORIGIN/DENY 会直接拦截导致无法访问。本产品为局域网本地
+            # 站端控制台，允许任意内嵌以换取可用性（如需防点击劫持再收紧）。
             self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
             self.send_header("Permissions-Policy", "geolocation=(self), microphone=(), camera=()")
             self.send_header(
                 "Content-Security-Policy",
                 "default-src 'self'; "
-                "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; "
+                "base-uri 'self'; object-src 'none'; form-action 'self'; "
                 "script-src 'self' 'unsafe-inline' https://unpkg.com; "
                 "style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; "
                 "font-src 'self' https://fonts.gstatic.com data:; "
