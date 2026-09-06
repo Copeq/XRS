@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import {
   VAlert,
   VBtn,
@@ -302,6 +302,8 @@ async function load() {
     }
     applyVisual((view as Dict).visual as Dict);
     await loadRawTree();
+    await loadMetrics();
+    await loadRuntime();
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -697,6 +699,87 @@ async function deleteRaw() {
   }
 }
 
+/* ------- 主机负载 / 运行时日志 ------- */
+const metricWin = ref("12h");
+const metricSeries = ref("load");
+const metricItems = ref<Array<Dict>>([]);
+const metricMeta = reactive<Dict>({});
+const logKind = ref("operation_logs");
+const logLines = ref<string[]>([]);
+const logKinds = [
+  { title: "操作日志", value: "operation_logs" },
+  { title: "系统日志", value: "system_logs" },
+  { title: "扫描日志", value: "scan_logs" },
+  { title: "事件日志", value: "event_logs" },
+];
+
+async function loadMetrics() {
+  try {
+    const d = (await pageFetch(`/api/settings/metrics?window=${encodeURIComponent(metricWin.value)}`)) as Dict;
+    metricItems.value = Array.isArray(d.items) ? (d.items as Array<Dict>) : [];
+    Object.assign(metricMeta, {
+      enabled: !!d.enabled,
+      window: text(d.window_label, metricWin.value),
+      count: num(d.count, metricItems.value.length),
+      source: text(d.temperature_source_label, "-"),
+      retention: num(d.retention_days, 0),
+    });
+  } catch (e) {
+    notify(`指标读取失败：${e instanceof Error ? e.message : String(e)}`, true);
+  }
+}
+
+function seriesNums(key: string): Array<{ x: number; y: number }> {
+  const pts: Array<{ x: number; y: number }> = [];
+  metricItems.value.forEach((it, i) => {
+    const y = Number(it[key]);
+    if (Number.isFinite(y)) pts.push({ x: i, y });
+  });
+  return pts;
+}
+
+function metricPath(): string {
+  const key = metricSeries.value;
+  const pts = seriesNums(key);
+  if (!pts.length) return "";
+  const W = 640;
+  const H = 130;
+  const pad = 6;
+  const ys = pts.map((p) => p.y);
+  let minY = Math.min(...ys);
+  let maxY = Math.max(...ys);
+  if (maxY - minY < 1e-6) {
+    minY -= 1;
+    maxY += 1;
+  }
+  const n = pts.length;
+  const sx = (i: number) => (n > 1 ? pad + (i * (W - pad * 2)) / (n - 1) : W / 2);
+  const sy = (y: number) => H - pad - ((y - minY) * (H - pad * 2)) / (maxY - minY);
+  return pts.map((p, i) => `${sx(i).toFixed(1)},${sy(p.y).toFixed(1)}`).join(" ");
+}
+
+function seriesMetaText(): string {
+  const key = metricSeries.value;
+  const pts = seriesNums(key);
+  if (!pts.length) return "暂无采样";
+  const last = pts[pts.length - 1].y;
+  const min = Math.min(...pts.map((p) => p.y));
+  const max = Math.max(...pts.map((p) => p.y));
+  return `最新 ${last.toFixed(1)} · 最小 ${min.toFixed(1)} · 最大 ${max.toFixed(1)}`;
+}
+
+const metricSeriesMeta = computed(() => seriesMetaText());
+
+async function loadRuntime() {
+  try {
+    const d = (await pageFetch("/api/settings/runtime?limit=100")) as Dict;
+    const arr = Array.isArray(d[logKind.value]) ? (d[logKind.value] as Array<unknown>) : [];
+    logLines.value = arr.slice(-80).map((x) => String(x));
+  } catch (e) {
+    logLines.value = [`读取失败：${e instanceof Error ? e.message : String(e)}`];
+  }
+}
+
 function openAdvanced() {
   window.open("/settings?standalone=1", "_blank", "noopener,noreferrer");
 }
@@ -1032,6 +1115,66 @@ onMounted(() => {
             提示：import 只接受本站导出格式；导入设置会先备份当前配置，失败自动回滚。
           </VChip>
         </section>
+
+        <!-- 主机负载与运行时日志 -->
+        <section class="st-card st-wide">
+          <h2>主机负载与运行时日志</h2>
+          <div class="d-flex flex-wrap ga-2 align-center mb-2">
+            <VSelect
+              v-model="metricWin"
+              label="时间窗"
+              :items="['1h', '6h', '12h', '24h', '7d']"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="metric-select"
+              @update:model-value="loadMetrics"
+            />
+            <VSelect
+              v-model="metricSeries"
+              label="指标"
+              :items="[
+                { title: '负载(load)', value: 'load' },
+                { title: '1分钟负载(load1)', value: 'load1' },
+                { title: 'CPU%', value: 'cpu' },
+                { title: '内存%', value: 'mem' },
+                { title: '温度℃', value: 'temp' },
+                { title: 'AP 数', value: 'ap' },
+              ]"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="metric-select"
+            />
+            <VBtn size="small" variant="tonal" @click="loadMetrics">刷新图表</VBtn>
+            <div class="flex-spacer" />
+            <VChip v-if="metricMeta.enabled === false" color="warning" variant="tonal" label>指标采集未启用</VChip>
+            <VChip variant="tonal" label>窗口 {{ metricMeta.window }} · 采样 {{ metricMeta.count }}</VChip>
+          </div>
+          <div v-if="!seriesNums(metricSeries).length" class="muted-note">暂无采样数据</div>
+          <svg v-else viewBox="0 0 640 130" preserveAspectRatio="none" class="spark" role="img" :aria-label="`${metricSeries} 趋势`">
+            <polyline :points="metricPath()" fill="none" stroke="var(--blue)" stroke-width="2" />
+          </svg>
+          <div class="d-flex align-center ga-2 mt-1 mb-4">
+            <span class="muted-note mono">{{ metricSeriesMeta }}</span>
+          </div>
+          <div class="text-caption text-medium-emphasis mb-1">运行时日志</div>
+          <div class="d-flex ga-2 mb-2">
+            <VSelect
+              v-model="logKind"
+              :items="logKinds"
+              item-title="title"
+              item-value="value"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="metric-select"
+              @update:model-value="loadRuntime"
+            />
+            <VBtn size="small" variant="tonal" @click="loadRuntime">刷新</VBtn>
+          </div>
+          <pre class="log-box">{{ logLines.length ? logLines.join("\n") : "暂无日志" }}</pre>
+        </section>
       </div>
 
       <div class="st-actions">
@@ -1164,6 +1307,36 @@ onMounted(() => {
   font-size: 11px;
   overflow-wrap: anywhere;
   word-break: break-all;
+}
+
+.metric-select {
+  width: 130px;
+}
+
+.spark {
+  width: 100%;
+  height: auto;
+  display: block;
+  background:
+    linear-gradient(color-mix(in srgb, var(--border) 34%, transparent) 1px, transparent 1px) 0 0 / 100% 25%,
+    linear-gradient(color-mix(in srgb, var(--border) 18%, transparent) 1px, transparent 1px) 0 0 / 25% 100%;
+}
+
+.log-box {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  color: var(--txt);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .st-actions {
