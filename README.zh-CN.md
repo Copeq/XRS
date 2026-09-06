@@ -19,6 +19,16 @@ XRS 是一个面向树莓派和其他 Linux 采集节点的固定式 Remote ID /
 
 基站版优先从自身目录运行。未显式传入路径时，`config.json`、`rid_storage.db` 和 `rid_model.json` 等运行文件都按当前工作目录解析；旧的 `history-cache.json` / `rid_history_cache.json` 会被视为一次性迁移来源。
 
+## 技术栈
+
+- **后端**：Python 3 站端运行时（`run.py` + `station_edition/xrs` 模块化装配），SQLite 历史存储，Linux / 树莓派 systemd 与 AP 支持。
+- **网页前端（新壳）**：Vue 3（`<script setup>`）+ TypeScript，Vite 构建（`frontend/app`）；正在渐进迁移到 **Vuetify 4**（品牌化 `xrsDark`/`xrsLight` 主题），图标使用 Material Design Icons（`@mdi/font`）。
+- **实时地图**：Leaflet（瓦片、无人机标记、轨迹、飞手位置、报警区域）。
+- **实时通道**：WebSocket 推送（`/ws?page=home`），由 `useLiveSocket` 消费。
+- **玻璃/主题系统**：`useUiTheme` 模块级单例 + CSS 变量 + `backdrop-filter`；支持自定义背景图/渐变、虚化与暗色遮罩，并持久化到 localStorage。
+- **页面 API**：同源 `pageFetch`/`postJson`，自动携带 `X-XRS-Page: 1` 页面会话头，沿用既有鉴权/EULA/OOBE gate。
+- **旧版 UI（迁移对象）**：`assets/vue/` 下的旧 Vue bundle（`rid-home.js`、`station-settings.js`）及内嵌 HTML 模板，作为 `legacy` 模式兜底。
+
 ## 功能概览
 
 - 局域网网页仪表盘

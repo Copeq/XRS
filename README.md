@@ -64,6 +64,16 @@ The station edition is meant to be usable from its own directory. Runtime files 
 
 ---
 
+## Tech Stack
+
+- **Backend**: Python 3 station runtime (`run.py` + modular chunks under `station_edition/xrs`), SQLite history store, systemd/AP support for Linux / Raspberry Pi.
+- **Web frontend (new shell)**: Vue 3 (`<script setup>`) + TypeScript, built with Vite (`frontend/app`); progressively migrating to **Vuetify 4** with XRS-branded `xrsDark` / `xrsLight` themes; Material Design Icons (`@mdi/font`).
+- **Live map**: Leaflet (tiles, markers, tracks, pilot positions, alert zones).
+- **Realtime**: WebSocket push (`/ws?page=home`) consumed by `useLiveSocket`.
+- **Glass / theme system**: `useUiTheme` module-singleton state + CSS custom properties + `backdrop-filter`; custom background image / gradients, blur & dim overlay, persisted in localStorage.
+- **Page API**: same-origin `pageFetch` / `postJson` carrying `X-XRS-Page: 1` behind the existing auth / EULA / OOBE gates.
+- **Legacy UI (migration target)**: older Vue bundles under `assets/vue/` (`rid-home.js`, `station-settings.js`) and embedded HTML templates kept for `legacy` mode.
+
 ## Architecture
 
 ### Editions
