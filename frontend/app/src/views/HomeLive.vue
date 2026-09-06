@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { VBtn, VBtnGroup, VTable } from "vuetify/components";
+import { VBtn, VBtnGroup, VCard, VEmptyState, VTable } from "vuetify/components";
 import { useLiveSocket, type DroneRow } from "../composables/useLiveSocket";
 import { useUiTheme } from "../composables/useUiTheme";
 import AppHeader from "../components/AppHeader.vue";
@@ -85,7 +85,14 @@ function logCls(row: unknown): string {
               <span class="count">{{ liveRows.length }}</span>
             </h2>
             <div class="live-cards">
-              <div v-for="d in liveRows" :key="d.sn" class="live-card" :data-sn="d.sn">
+              <VCard
+                v-for="d in liveRows"
+                :key="d.sn"
+                :data-sn="d.sn"
+                variant="tonal"
+                density="compact"
+                class="live-card"
+              >
                 <div class="card-grid">
                   <span class="k">品牌+型号</span>
                   <span class="v brand">{{ text(d.model, "N/A") }}</span>
@@ -102,8 +109,14 @@ function logCls(row: unknown): string {
                   <span class="k">序列号</span>
                   <span class="v mono" :title="text(d.sn)">{{ text(d.sn) }}</span>
                 </div>
-              </div>
-              <div v-if="!liveRows.length" class="empty">暂无在线无人机（可在「更多 → 模拟目标」启动内存仿真验证）。</div>
+              </VCard>
+              <VEmptyState
+                v-if="!liveRows.length"
+                icon="mdi-satellite-variant"
+                title="暂无在线无人机"
+                :text="`WS：${state.connected ? 'connected' : 'connecting…'} · 可在「更多 → 模拟目标」启动内存仿真验证`"
+                class="empty-state"
+              />
             </div>
           </section>
 

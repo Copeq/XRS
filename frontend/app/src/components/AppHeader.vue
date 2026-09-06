@@ -16,6 +16,8 @@ import {
   VSlider,
   VSpacer,
   VSwitch,
+  VTab,
+  VTabs,
   VTextField,
   VToolbar,
   VToolbarTitle,
@@ -24,8 +26,14 @@ import { postJson, pageFetch } from "../composables/pageApi";
 import { useUiTheme } from "../composables/useUiTheme";
 import type { HomeState } from "../composables/useLiveSocket";
 
-const props = defineProps<{ state: HomeState; page: "live" | "history" | "hardware" | "settings" }>();
-const emit = defineEmits<{ (e: "set-page", p: "live" | "history" | "hardware" | "settings"): void }>();
+type PageKey = "live" | "history" | "hardware" | "settings";
+const props = defineProps<{ state: HomeState; page: PageKey }>();
+const emit = defineEmits<{ (e: "set-page", p: PageKey): void }>();
+
+const pageModel = computed({
+  get: () => props.page,
+  set: (v: unknown) => emit("set-page", String(v) as PageKey),
+});
 
 type MetaRecord = Record<string, unknown>;
 
@@ -339,12 +347,12 @@ async function simStop() {
       </div>
     </div>
 
-    <nav class="app-tab-nav">
-      <button class="app-tab-btn" :class="{ active: page === 'live' }" type="button" @click="emit('set-page', 'live')">实时</button>
-      <button class="app-tab-btn" :class="{ active: page === 'history' }" type="button" @click="emit('set-page', 'history')">历史记录</button>
-      <button class="app-tab-btn" :class="{ active: page === 'hardware' }" type="button" @click="emit('set-page', 'hardware')">硬件助手</button>
-      <button class="app-tab-btn" :class="{ active: page === 'settings' }" type="button" @click="emit('set-page', 'settings')">设置</button>
-    </nav>
+    <VTabs v-model="pageModel" color="primary" density="compact" class="app-tab-nav" show-arrows>
+      <VTab value="live">实时</VTab>
+      <VTab value="history">历史记录</VTab>
+      <VTab value="hardware">硬件助手</VTab>
+      <VTab value="settings">设置</VTab>
+    </VTabs>
 
     <!-- 模拟目标弹窗 -->
     <div v-if="simOpen" class="modal-mask" @click.self="simOpen = false">
