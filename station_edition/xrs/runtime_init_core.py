@@ -154,4 +154,8 @@ def reload_runtime_config(cfg: dict | None) -> tuple[bool, str]:
     return True, "runtime config reloaded"
 
 def _wecom_webhook_url(key: str) -> str:
-    return f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={key}"
+    """兼容两种填写方式：完整 webhook 地址，或仅 key 参数值。"""
+    text = str(key or "").strip()
+    if text.startswith("http://") or text.startswith("https://"):
+        return text
+    return f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={text}"
