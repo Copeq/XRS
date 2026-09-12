@@ -36,6 +36,10 @@ station_edition/history-cache.json
 host_metrics.jsonl
 host_metrics.jsonl.tmp
 xrs_scanner/
+# Runtime-downloaded assets (regenerated at startup, never commit)
+station_edition/oui.txt
+station_edition/rid_model.json
+station_edition/rid_model.json.bak
 rid-n/ridn_config.json
 rid-n/**/*.runtime.json
 rid-n/data/

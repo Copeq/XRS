@@ -23,6 +23,7 @@ DEFAULT_CHUNK_FILES: tuple[str, ...] = (
     "oui_ap_core.py",
     "models_remote_core.py",
     "scan_core.py",
+    "ble_rid_core.py",
     "process_core.py",
     "live_ws_core.py",
     "app_update_core.py",

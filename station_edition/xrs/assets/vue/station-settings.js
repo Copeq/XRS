@@ -1058,7 +1058,12 @@
         }).join("") + "</div>";
       }
     }
-    setStatus("status-runtime", "AP " + String((data.aps || []).length || 0) + "/" + String(data.aps_total || 0), false);
+    var statusText = "AP " + String((data.aps || []).length || 0) + "/" + String(data.aps_total || 0);
+    var cap = data.capture || {};
+    statusText += " | 采集: " + (cap.iface_ok === false ? ("自检异常 - " + String(cap.msg || "未知")) : String(cap.state || "ok"));
+    var ble = data.ble || {};
+    statusText += " | BLE: " + (ble.enabled ? (String(ble.state || "running") + " hits=" + String(ble.rid_hits || 0)) : "未启用");
+    setStatus("status-runtime", statusText, cap.iface_ok === false);
   }
   function renderSettingsRuntimeLog(data) {
     data = data || {};

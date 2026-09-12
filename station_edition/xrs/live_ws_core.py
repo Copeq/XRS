@@ -28,6 +28,8 @@ def _ws_settings_runtime_payload() -> dict:
         "aps_seq": aps_seq,
         "aps_total": aps_total,
         "workflow": _history_reparse_workflow_snapshot(),
+        "capture": _sniff_health_meta(time.monotonic(), time.time()),
+        "ble": ble_scan_status(),
     }
 
 _HOME_LIST_DRONE_FIELDS = (
@@ -225,14 +227,18 @@ def _ws_push_loop() -> None:
                         home_snapshot = _state_snapshot(lightweight=True)
                         logs_seq = home_snapshot.get("logs_seq")
                         aps_seq = home_snapshot.get("aps_seq")
+                        bles_seq = home_snapshot.get("bles_seq")
                         if last_home_logs_seq == logs_seq:
                             home_snapshot.pop("logs", None)
                         if last_home_aps_seq == aps_seq:
                             home_snapshot.pop("aps", None)
+                        if last_home_bles_seq == bles_seq:
+                            home_snapshot.pop("bles", None)
                         home_payload = _ws_json_dumps(home_snapshot)
                         home_frame = _ws_frame(home_payload)
                         last_home_logs_seq = logs_seq
                         last_home_aps_seq = aps_seq
+                        last_home_bles_seq = bles_seq
                     _ws_send_client(client, home_frame)
             except Exception:
                 dead.append(client)
@@ -562,17 +568,24 @@ def _state_snapshot(lightweight: bool = False) -> dict:
     if lightweight:
         payload.pop("map_drones", None)
         payload["meta"] = _home_meta_summary(payload.get("meta") or {})
-    if not lightweight:
-        with log_lock:
-            logs = list(ap_buf)[-80:]
-            logs_seq = ap_seq
-        aps, aps_seq, aps_total = _ap_snapshot()
-        payload.update({
-            "logs": logs,
-            "logs_seq": logs_seq,
-            "aps": aps,
-            "aps_seq": aps_seq,
-            "aps_total": aps_total,
-            "notifications": _notification_payload(200),
-        })
+    # Logs/AP data are always attached. The home websocket relies on them and
+    # uses their seq values to emit only deltas (see _ws_push_loop). Skipping
+    # them for lightweight snapshots left the home AP/event panels permanently
+    # empty, because the home page is served exclusively via lightweight frames.
+    with log_lock:
+        logs = list(ap_buf)[-80:]
+        logs_seq = ap_seq
+    aps, aps_seq, aps_total = _ap_snapshot()
+    bles, bles_seq, bles_total = _ble_device_snapshot()
+    payload.update({
+        "logs": logs,
+        "logs_seq": logs_seq,
+        "aps": aps,
+        "aps_seq": aps_seq,
+        "aps_total": aps_total,
+        "bles": bles,
+        "bles_seq": bles_seq,
+        "bles_total": bles_total,
+        "notifications": _notification_payload(200),
+    })
     return payload

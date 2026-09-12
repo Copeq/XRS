@@ -23,6 +23,8 @@ def default_app_config() -> dict:
             "hop": False,
             "hop_5g": False,
             "scan_wifi_fast": False,
+            "ble_scan": False,
+            "ble_hci": "",
             "auto_self_heal": True,
             "dwell_2g": DWELL_2G_DEFAULT,
             "dwell_5g": DWELL_5G_DEFAULT,
@@ -862,9 +864,11 @@ def _build_visual_settings_candidate(body: dict | None) -> tuple[dict | None, st
             basic["channel"] = None if p_basic.get("channel") in (None, "") else int(p_basic.get("channel"))
         except Exception:
             return {"ok": False, "error": "invalid channel"}
-    for k in ("hop", "hop_5g", "scan_wifi_fast", "auto_self_heal", "change_on_rssi", "change_on_payload", "debug", "no_tui"):
+    for k in ("hop", "hop_5g", "scan_wifi_fast", "ble_scan", "auto_self_heal", "change_on_rssi", "change_on_payload", "debug", "no_tui"):
         if k in p_basic:
             basic[k] = bool(p_basic.get(k))
+    if "ble_hci" in p_basic:
+        basic["ble_hci"] = str(p_basic.get("ble_hci") or "").strip()
     for k, default_v in (
         ("time", DEFAULT_PRINT_INTERVAL),
         ("min_gap", DEFAULT_MIN_GAP),

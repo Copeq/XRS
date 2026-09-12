@@ -526,6 +526,7 @@ def _hw_status_snapshot() -> dict:
         "scan_wifi_fast": bool(SCAN_WIFI_FAST),
         "wifi_fast_supported": WIFI_FAST_SUPPORTED,
         "wifi_fast_msg": str(WIFI_FAST_SUPPORT_MSG or ""),
+        "ble_scan": ble_scan_status(),
         "host": host,
     }
 

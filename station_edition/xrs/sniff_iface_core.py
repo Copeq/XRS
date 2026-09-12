@@ -40,6 +40,84 @@ def _sniff_note_resume() -> None:
         sniff_last_error = ""
         sniff_last_error_wall = 0.0
 
+def _sniff_clear_error_matching(reason: str) -> None:
+    """Clear sniff_last_error when it still holds the given transient reason.
+
+    Recovery reasons (e.g. the first-bind "iface connected" reset) are recorded
+    through _sniff_note_error so the UI can show why the interface is being
+    reset, but they are not persistent faults. Once recovery succeeds the stale
+    reason must be dropped, otherwise a healthy monitor interface keeps being
+    reported as "sniff error" until the first management frame arrives.
+    """
+    global sniff_last_error, sniff_last_error_wall
+    text = str(reason or "").strip()
+    if len(text) > 220:
+        text = text[:220]
+    if not text:
+        return
+    with sniff_health_lock:
+        if sniff_last_error == text:
+            sniff_last_error = ""
+            sniff_last_error_wall = 0.0
+
+_sniff_iface_health_cache: dict = {"key": "", "ts": 0.0, "data": {}}
+
+def _sniff_iface_health(iface: str) -> dict:
+    """Self-check the capture NIC: existence, admin state, monitor mode, link.
+
+    A dormant/unknown operstate is normal for a monitor interface, so only hard
+    failure states (missing / down / not monitor) are reported as unhealthy.
+    """
+    name = str(iface or "").strip()
+    out = {
+        "iface": name, "exists": False, "admin_up": False, "mode": "",
+        "monitor": False, "operstate": "", "ok": False, "reason": "",
+    }
+    if not name:
+        out["reason"] = "未绑定采集网卡，无法采集"
+        return out
+    base = os.path.join("/sys/class/net", name)
+    if not os.path.isdir(base):
+        out["reason"] = f"采集网卡 {name} 不存在（可能已被拔出）"
+        return out
+    out["exists"] = True
+    try:
+        with open(os.path.join(base, "operstate"), "r", encoding="utf-8", errors="ignore") as f:
+            out["operstate"] = f.read().strip()
+    except Exception:
+        pass
+    try:
+        with open(os.path.join(base, "flags"), "r", encoding="utf-8", errors="ignore") as f:
+            out["admin_up"] = bool(int(f.read().strip(), 16) & 0x1)
+    except Exception:
+        pass
+    info = run_cmd(f"iw dev {name} info") or ""
+    m = re.search(r"^\s*type\s+(\S+)", info, re.MULTILINE)
+    out["mode"] = m.group(1) if m else ""
+    out["monitor"] = (out["mode"] == "monitor")
+    if not out["admin_up"]:
+        out["reason"] = f"采集网卡 {name} 处于 DOWN 状态（未启用）"
+    elif not out["monitor"]:
+        out["reason"] = f"采集网卡 {name} 未处于 monitor 模式（当前 {out['mode'] or '未知'}）"
+    elif out["operstate"] in ("down", "lowerlayerdown", "notpresent"):
+        out["reason"] = f"采集网卡 {name} 链路异常（operstate={out['operstate']}）"
+    else:
+        out["ok"] = True
+    return out
+
+def _sniff_iface_health_cached(iface: str, ttl_sec: float = 10.0) -> dict:
+    """Throttled wrapper around _sniff_iface_health (subprocess-based check)."""
+    key = str(iface or "")
+    now = time.monotonic()
+    cache = _sniff_iface_health_cache
+    if cache.get("key") == key and (now - float(cache.get("ts") or 0.0)) < float(ttl_sec or 10.0):
+        return cache.get("data") or {}
+    data = _sniff_iface_health(key)
+    cache["key"] = key
+    cache["ts"] = now
+    cache["data"] = data
+    return data
+
 def _sniff_health_meta(now_mono: float, now_wall: float) -> dict:
     with sniff_health_lock:
         last_pkt_mono = float(sniff_last_pkt_mono or 0.0)
@@ -50,9 +128,13 @@ def _sniff_health_meta(now_mono: float, now_wall: float) -> dict:
     idle_sec = None
     if last_pkt_mono > 0.0:
         idle_sec = max(0.0, now_mono - last_pkt_mono)
+    iface_state = _sniff_iface_health_cached(iface)
     state = "ok"
     msg = ""
-    if last_err:
+    if not iface_state.get("ok"):
+        state = "error"
+        msg = str(iface_state.get("reason") or "采集网卡状态异常")
+    elif last_err:
         state = "error"
         msg = last_err
     elif idle_sec is None:
@@ -60,11 +142,14 @@ def _sniff_health_meta(now_mono: float, now_wall: float) -> dict:
         msg = "尚未收到无线管理帧"
     elif idle_sec >= SNIFF_STALL_RECOVER_SEC:
         state = "warn"
-        msg = f"{int(idle_sec)}s no wireless management frame"
+        msg = f"{int(idle_sec)}s 未收到无线管理帧（采集可能异常）"
     return {
         "state": state,
         "msg": msg,
         "iface": iface,
+        "iface_mode": str(iface_state.get("mode") or ""),
+        "iface_operstate": str(iface_state.get("operstate") or ""),
+        "iface_ok": bool(iface_state.get("ok")),
         "idle_sec": (None if idle_sec is None else int(round(idle_sec))),
         "last_pkt": _fmt_wall_ts(last_pkt_wall if last_pkt_wall > 0 else None),
         "last_err_at": _fmt_wall_ts(last_err_wall if last_err_wall > 0 else None),
@@ -134,6 +219,9 @@ def _sniff_recover_iface(iface: str, reason: str, force: bool = False) -> bool:
         _log(f"[INFO] sniff recover result: {' | '.join(info_lines)}")
     with sniff_health_lock:
         sniff_iface_name = iface
+    # Interface reached monitor: the reason recorded above was only a transient
+    # reset trigger, so clear it now that capture is usable again.
+    _sniff_clear_error_matching(reason)
     return True
 
 def _sniff_close_socket(sock) -> None:

@@ -270,6 +270,7 @@ def main() -> None:
     init_auth_from_config(APP_CONFIG)
     init_api_from_config(APP_CONFIG)
     init_notify_from_config(APP_CONFIG)
+    init_ble_from_config(APP_CONFIG)
     start_oui_loader()
     ensure_model_map_file(model_path or args.model_map)
     load_model_map(args.model_map)
@@ -380,6 +381,7 @@ def main() -> None:
     start_config_update_worker()
     start_app_update_check()
     _app_update_mark_startup_ready()
+    start_ble_scanner()
 
     def sniff_thread():
         global sniff_iface_name
@@ -414,7 +416,37 @@ def main() -> None:
             nonlocal iface_watch_since
             iface_watch_since = time.monotonic() if iface_name else 0.0
 
+        last_selfcheck_wall = 0.0
+        selfcheck_notice = ""
         while True:
+            # Capture NIC self-check: surface + auto-heal a NIC that dropped out
+            # of monitor mode / went down, instead of silently receiving nothing.
+            now_sc_wall = time.time()
+            if iface_cur and (now_sc_wall - last_selfcheck_wall) >= 15.0:
+                last_selfcheck_wall = now_sc_wall
+                health = _sniff_iface_health(iface_cur)
+                if not health.get("ok"):
+                    sc_msg = str(health.get("reason") or "采集网卡状态异常")
+                    _sniff_note_error(sc_msg)
+                    _log(f"[WARN] 采集自检: {sc_msg}; 尝试恢复 {iface_cur}")
+                    if selfcheck_notice != sc_msg:
+                        selfcheck_notice = sc_msg
+                        try:
+                            _notification_add(f"采集自检异常：{sc_msg}", "warn", "selfcheck")
+                        except Exception:
+                            pass
+                    if _sniff_recover_iface(iface_cur, sc_msg, force=True):
+                        _log(f"[INFO] 采集自检: 网卡 {iface_cur} 已恢复 monitor")
+                        set_iface_watch(iface_cur)
+                        note_recover_success()
+                        if selfcheck_notice:
+                            selfcheck_notice = ""
+                            try:
+                                _notification_add(f"采集自检已恢复：{iface_cur}", "ok", "selfcheck")
+                            except Exception:
+                                pass
+                    else:
+                        note_recover_failure(sc_msg)
             prefer_iface = _cfg_preferred_iface()
             if not iface_cur:
                 iface_cur = _sniff_pick_iface(prefer=prefer_iface)

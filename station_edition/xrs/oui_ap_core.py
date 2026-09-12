@@ -20,7 +20,16 @@ def _mac_hex12(mac: str | None) -> str:
     return h[:12]
 
 def _is_wifi_fast_mac(mac: str | None) -> bool:
-    return _mac_oui_key(mac).lower() == WIFI_FAST_OUI_PREFIX.replace(":", "").lower()
+    key = _mac_oui_key(mac).lower()
+    if not key:
+        return False
+    prefixes = globals().get("WIFI_FAST_OUI_PREFIXES") or (WIFI_FAST_OUI_PREFIX,)
+    if key in {str(p).replace(":", "").lower() for p in prefixes}:
+        return True
+    # Fall back to the loaded IEEE OUI database: any OUI assigned to DJI is
+    # treated as a Wi-Fi fast-transfer candidate, so newly seen DJI hotspots
+    # (e.g. Mini 4 Pro on e4:7a:2c) match without hard-coding each prefix.
+    return "dji" in _lookup_oui_vendor(mac).lower()
 
 def _wifi_fast_sn(mac: str | None) -> str:
     h12 = _mac_hex12(mac).upper()
